@@ -1,0 +1,47 @@
+正在导入数据...
+成功导入2379患者，共2379个检查
+
+===== 启动 GPU 向量化蚁群算法 (ACO) =====
+ACO 初始化完成: N=2379, Ants=100, Alpha=1.0, Beta=5.0
+[ACO] New Best at iter 0: -222283200.00
+[ACO] New Best at iter 3: -220506400.00
+[ACO] New Best at iter 4: -207127200.00
+Iter 10/300 | Best: -207127200.00 | Time: 1.345s
+Iter 20/300 | Best: -207127200.00 | Time: 1.328s
+[ACO] New Best at iter 26: -198328400.00
+Iter 30/300 | Best: -198328400.00 | Time: 1.323s
+Iter 40/300 | Best: -198328400.00 | Time: 1.405s
+Iter 50/300 | Best: -198328400.00 | Time: 1.336s
+Iter 60/300 | Best: -198328400.00 | Time: 1.344s
+Iter 70/300 | Best: -198328400.00 | Time: 1.339s
+Iter 80/300 | Best: -198328400.00 | Time: 1.344s
+Iter 90/300 | Best: -198328400.00 | Time: 1.332s
+Iter 100/300 | Best: -198328400.00 | Time: 1.773s
+[ACO] New Best at iter 105: -197372400.00
+Iter 110/300 | Best: -197372400.00 | Time: 1.354s
+Iter 120/300 | Best: -197372400.00 | Time: 1.335s
+Iter 130/300 | Best: -197372400.00 | Time: 1.325s
+Iter 140/300 | Best: -197372400.00 | Time: 1.346s
+Iter 150/300 | Best: -197372400.00 | Time: 1.319s
+Iter 160/300 | Best: -197372400.00 | Time: 1.325s
+Iter 170/300 | Best: -197372400.00 | Time: 1.329s
+Iter 180/300 | Best: -197372400.00 | Time: 1.324s
+Iter 190/300 | Best: -197372400.00 | Time: 1.340s
+Iter 200/300 | Best: -197372400.00 | Time: 1.332s
+Iter 210/300 | Best: -197372400.00 | Time: 1.329s
+Iter 220/300 | Best: -197372400.00 | Time: 1.337s
+[ACO] New Best at iter 223: -192534800.00
+Iter 230/300 | Best: -192534800.00 | Time: 1.328s
+[ACO] New Best at iter 232: -192180000.00
+Iter 240/300 | Best: -192180000.00 | Time: 1.322s
+Iter 250/300 | Best: -192180000.00 | Time: 1.326s
+Iter 260/300 | Best: -192180000.00 | Time: 1.322s
+Iter 270/300 | Best: -192180000.00 | Time: 1.330s
+Iter 280/300 | Best: -192180000.00 | Time: 1.330s
+Iter 290/300 | Best: -192180000.00 | Time: 2.550s
+[ACO] New Best at iter 291: -182038800.00
+Iter 300/300 | Best: -182038800.00 | Time: 2.003s
+
+✓ 优化结束，总耗时: 564.32s
+✓ 最佳 Fitness: -182038800.00
+✓ 文件已导出: output_schedules_aco/aco_gpu_schedule_20251208_211120.xlsx

@@ -1105,7 +1105,7 @@
 #     multiprocessing.freeze_support()
 #     main()
 
-
+#没有一分钟换模时间
 from __future__ import annotations
 from typing import List, Dict, Set, Tuple, Any
 import pandas as pd
@@ -1819,13 +1819,6 @@ class MultiRunOptimizer:
         self.population_tensor = pop # 保存最终状态
         return results
 
-    # ------- 交叉和变异函数 (无需修改) -------
-    # ( ... _random_cuts, _ordered_crossover_batch_gpu ... )
-    # ( ... _mutate_step1_violations, _mutate_step2_base_swap ... )
-    # ( ... _mutate_step3_greedy_cluster, _mutate_batch_gpu ... )
-    # ( ... _greedy_cluster_mutation_gpu_inplace ... )
-    # ( ... 保持不变 ... )
-    
     @staticmethod
     def _random_cuts(num_rows: int, N: int):
         a = torch.randint(0, N, (num_rows,), device=DEVICE)
