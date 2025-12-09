@@ -1992,7 +1992,7 @@ class MultiRunOptimizer:
         
         X = self._mutate_step1_violations(X, parent_violate_mask)
         X = self._mutate_step2_base_swap(X, current_gen, base_swap_prob)
-        #X = self._mutate_step3_greedy_cluster(X, greedy_prob)
+        X = self._mutate_step3_greedy_cluster(X, greedy_prob)
         
         return X
 

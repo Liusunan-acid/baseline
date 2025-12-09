@@ -305,16 +305,7 @@ def calculate_schedule_score(schedule_file, constraint_file='device_constraints.
 if __name__ == "__main__":
     # --- 运行配置 ---
     # 默认查找 output_schedules 文件夹下的最新文件，或者当前目录的 schedule_result.xlsx
-    target_file = '/home/preprocess/_funsearch/baseline/schedule_seconds_fifo_20251205_193816.xlsx'
-    
-    # 尝试自动寻找 output_schedules 中最新的 excel
-    output_dir = 'output_schedules'
-    if os.path.exists(output_dir):
-        files = [os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith('.xlsx')]
-        if files:
-            target_file = max(files, key=os.path.getmtime)
-            print(f"自动检测到最新排班文件: {target_file}")
-
+    target_file = "/home/preprocess/_funsearch/baseline/output_schedules/ALNS_schedule_20251209_193944_fit_-133020800.xlsx"
     constraint_file = '设备限制4.xlsx' 
     if not os.path.exists(constraint_file):
          # 尝试在上级目录找 (适应实验代码结构)
