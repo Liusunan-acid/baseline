@@ -1,838 +1,1583 @@
+# # column_generation_baseline.py
+# # ============================================================
+# # MRI排程系统 - 列生成算法基线 (Column Generation Baseline)
+# # 核心思想：使用列生成(CG)处理大规模排程，主问题(RMP)负责选择，子问题(Pricing)负责生成
+# # 修复：引入松弛变量(Slack Variables)解决 Infeasible 问题
+# # ============================================================
+
+# from __future__ import annotations
+# from dataclasses import dataclass
+# from typing import List, Dict, Tuple, Set, Optional
+# import pandas as pd
+# import numpy as np
+# from datetime import datetime, timedelta
+# from collections import defaultdict
+# import os
+# import re
+# import traceback
+
+# # 必须安装: pip install ortools
+# from ortools.linear_solver import pywraplp
+
+# # ===================== 全局配置与常量 =====================
+
+# # 定义不同星期的每日工作结束时间（用于计算每日可用工时）
+# # 15.0 - WEEKDAY_END_HOURS[w] = 每日可用小时数
+# WEEKDAY_END_HOURS = {1: 5.3, 2: 4.9, 3: 3.5, 4: 3.8, 5: 5.7, 6: 1.7, 7: 1.7}
+
+# WORK_START_STR = '07:00'
+# WORK_START = datetime.strptime(WORK_START_STR, '%H:%M').time()
+# START_DATE = datetime(2025, 1, 1, 7, 0) # 排程开始日期
+# MACHINE_COUNT = 6   # 机器总数
+# SEARCH_DAYS = 130    # 向后搜索/排程的天数窗口
+
+# # === 评分与惩罚权重 (越低越好，用于目标函数最小化) ===
+# TRANSITION_PENALTY = 20000    # 换模惩罚（同一天切换检查类型）
+# SELF_SELECTED_PENALTY = 8000  # 自选时间患者的等待惩罚系数 (元/天)
+# NON_SELF_PENALTY = 800        # 非自选时间患者的等待惩罚系数 (元/天)
+# DEVICE_PENALTY = 500000       # 违反设备/硬规则的巨额惩罚
+# LOGICAL_PENALTY = 10000       # 逻辑错误（如排在登记日前）惩罚
+
+# # 新增：未排程惩罚 (Slack Variable Cost)
+# # 必须设置得非常大，大于任何可能的正常列成本，确保求解器只在万不得已时才丢弃患者
+# UNSCHEDULED_PENALTY = 1e9     
+
+# # ===================== 数据清洗与导入工具函数 =====================
+
+# def clean_exam_name(name):
+#     """标准化检查项目名称，去除特殊符号，统一格式"""
+#     s = str(name).strip().lower()
+#     # 统一括号格式
+#     s = re.sub(r'[（）]', lambda x: '(' if x.group() == '（' else ')', s)
+#     # 去除杂质字符
+#     s = re.sub(r'[^\w()-]', '', s)
+#     return s.replace('_', '-').replace(' ', '')
+
+# def safe_read_excel(file_path, sheet_name=0):
+#     """尝试使用不同的引擎读取Excel，兼容旧版xls和新版xlsx"""
+#     if file_path.endswith('.xlsx'):
+#         engines = ['openpyxl', 'odf']
+#     elif file_path.endswith('.xls'):
+#         engines = ['xlrd']
+#     else:
+#         engines = ['openpyxl', 'xlrd', 'odf']
+    
+#     for engine in engines:
+#         try:
+#             return pd.read_excel(file_path, engine=engine, sheet_name=sheet_name)
+#         except Exception:
+#             continue
+#     # 最后尝试默认引擎
+#     return pd.read_excel(file_path, sheet_name=sheet_name)
+
+# def import_data(patient_file, duration_file):
+#     """
+#     导入患者数据和耗时标准
+#     Returns:
+#         patients: List[dict] 患者列表，包含ID、类型、耗时(秒)、登记时间等
+#     """
+#     print(f"正在读取患者数据: {patient_file}")
+#     try:
+#         # 1. 读取耗时标准
+#         duration_df = safe_read_excel(duration_file)
+#         duration_df['cleaned_exam'] = duration_df['检查项目'].apply(clean_exam_name)
+#         # 建立 检查项目 -> 平均耗时(分钟) 的映射
+#         exam_durations = duration_df.set_index('cleaned_exam')['实际平均耗时'].to_dict()
+
+#         # 2. 读取患者列表
+#         patient_df = safe_read_excel(patient_file)
+#         patients = []
+
+#         for _, row in patient_df.iterrows():
+#             if pd.isnull(row.get('id')) or pd.isnull(row.get('登记日期')):
+#                 continue
+
+#             raw_id = str(row['id']).strip()
+#             reg_dt = pd.to_datetime(row['登记日期'])
+#             cid = (raw_id, reg_dt.strftime('%Y%m%d')) # 复合ID
+
+#             exam_type = clean_exam_name(row['检查项目'])
+
+#             # 获取耗时，默认为15分钟
+#             val = exam_durations.get(exam_type, 15.0)
+#             try:
+#                 duration_raw_min = float(val)
+#             except Exception:
+#                 duration_raw_min = 15.0
+            
+#             # 转换为秒
+#             duration_sec = int(round(duration_raw_min * 60))
+#             duration_sec = max(1, duration_sec)
+
+#             is_self_selected = (row.get('是否自选时间') == '自选时间')
+
+#             p = {
+#                 'id': raw_id,
+#                 'cid': cid,
+#                 'exam_type': exam_type,
+#                 'duration': duration_sec,  # 秒
+#                 'reg_date': reg_dt.date(),
+#                 'reg_datetime': reg_dt,
+#                 'is_self_selected': is_self_selected,
+#                 'original_row': row
+#             }
+#             patients.append(p)
+
+#         # 按登记时间排序，这对后续贪心算法有帮助（优先处理先来的）
+#         patients.sort(key=lambda x: x['reg_datetime'])
+#         print(f"成功导入 {len(patients)} 名患者。")
+#         return patients
+#     except Exception as e:
+#         print(f"数据导入错误: {e}")
+#         traceback.print_exc()
+#         raise
+
+# def import_device_constraints(file_path):
+#     """读取设备限制：某台机器只能做哪些项目"""
+#     print(f"正在读取设备限制: {file_path}")
+#     try:
+#         df = safe_read_excel(file_path)
+#         machine_exam_map = defaultdict(set)
+#         for _, row in df.iterrows():
+#             mid = int(row['设备']) - 1 # 转为0-based索引
+#             exam = clean_exam_name(row['检查项目'])
+#             machine_exam_map[mid].add(exam)
+#         return machine_exam_map
+#     except Exception as e:
+#         print(f"导入设备限制数据错误: {e}")
+#         traceback.print_exc()
+#         raise
+
+
+# # ===================== 业务规则与逻辑校验 =====================
+
+# def daily_work_seconds(date_obj):
+#     """计算某一天该机器的总可用秒数"""
+#     weekday = date_obj.isoweekday()
+#     # 假设每日标准结束时间为 15:00 (即15.0)，减去特定星期的缩减时间
+#     hours_avail = 15.0 - WEEKDAY_END_HOURS.get(weekday, 0)
+#     return int(round(hours_avail * 3600))
+
+# def is_rule_feasible(p, machine_id: int, date_obj):
+#     """
+#     硬规则检查：
+#     1. 心脏检查：必须周二/周四，且必须在机器4 (index 3)
+#     2. 造影检查：必须周一/三/五，且必须在机器2 (index 1)
+#     3. 增强检查：周末禁止做
+#     """
+#     exam_name = str(p['exam_type'])
+#     weekday = date_obj.isoweekday()
+#     m_idx = machine_id
+
+#     is_heart = '心脏' in exam_name
+#     is_angio = '造影' in exam_name
+#     is_contrast = '增强' in exam_name
+
+#     # 规则1：心脏
+#     if is_heart:
+#         ok_wd = (weekday == 2 or weekday == 4)
+#         ok_mc = (m_idx == 3)
+#         if not (ok_wd and ok_mc):
+#             return False
+
+#     # 规则2：造影
+#     if is_angio:
+#         ok_wd = (weekday == 1 or weekday == 3 or weekday == 5)
+#         ok_mc = (m_idx == 1)
+#         if not (ok_wd and ok_mc):
+#             return False
+
+#     # 规则3：周末无增强
+#     is_weekend = (weekday == 6 or weekday == 7)
+#     if is_contrast and is_weekend:
+#         return False
+
+#     return True
+
+# def is_device_feasible(p, machine_id: int, machine_exam_map):
+#     """检查设备能力限制"""
+#     allowed = machine_exam_map.get(machine_id, set())
+#     return (p['exam_type'] in allowed) if allowed else False
+
+# def patient_wait_weight(p):
+#     """获取患者的等待权重"""
+#     return SELF_SELECTED_PENALTY if p['is_self_selected'] else NON_SELF_PENALTY
+
+
+# # ===================== 列生成核心数据结构 =====================
+
+# @dataclass
+# class Column:
+#     """
+#     列（Column）代表一个具体的排班方案片段：
+#     即“某台机器(machine_id)在某一天(date)服务了一组患者(patients_idx)”
+#     """
+#     col_id: int
+#     machine_id: int
+#     date: datetime.date
+#     patients_idx: List[int]         # 患者在全局列表中的索引
+#     cost: int                       # 该列的计算成本 (reduced cost计算的基础)
+#     transition_count: int           # 该列内部的换模次数
+
+
+# # ===================== 成本计算函数 =====================
+
+# def compute_column_cost(patients: List[dict], col_patients_idx: List[int], date_obj):
+#     """
+#     计算单列的实际成本 (Real Cost)：
+#     Cost = (总等待天数 * 权重) + (换模次数 * 换模惩罚)
+#     """
+#     if not col_patients_idx:
+#         return 0, 0
+
+#     # 为了计算换模，假设列内患者按登记时间排序执行
+#     sorted_idx = sorted(col_patients_idx, key=lambda i: patients[i]['reg_datetime'])
+
+#     wait_cost = 0
+#     transition_cnt = 0
+#     prev_type = None
+
+#     for i in sorted_idx:
+#         p = patients[i]
+#         wait_days = (date_obj - p['reg_date']).days
+        
+#         if wait_days < 0:
+#             # 逻辑防御：排在登记日之前的非法情况
+#             wait_cost += LOGICAL_PENALTY
+#         else:
+#             wait_cost += wait_days * patient_wait_weight(p)
+
+#         # 换模检测
+#         if prev_type is not None and p['exam_type'] != prev_type:
+#             transition_cnt += 1
+#         prev_type = p['exam_type']
+
+#     cost = int(wait_cost + transition_cnt * TRANSITION_PENALTY)
+#     return cost, transition_cnt
+
+
+# # ===================== 第一步：初始化 (Initialization) =====================
+
+# def build_initial_columns(patients, machine_exam_map, start_date, search_days):
+#     """
+#     生成初始列集合。
+#     策略：为确保有解，尝试为每个患者分配一个“最早可行的单人列”。
+#     """
+#     print("正在生成初始列...")
+#     columns: List[Column] = []
+#     col_id = 0
+
+#     for i, p in enumerate(patients):
+#         assigned = False
+#         earliest_date = max(p['reg_date'], start_date.date())
+#         # 从最早可行日期开始向后找几天
+#         start_offset = (earliest_date - start_date.date()).days
+
+#         for d in range(start_offset, start_offset + search_days):
+#             date_obj = start_date.date() + timedelta(days=d)
+#             # 跳过休息日/无工时日
+#             if daily_work_seconds(date_obj) <= 0:
+#                 continue
+
+#             for m in range(MACHINE_COUNT):
+#                 # 检查设备能力
+#                 if not is_device_feasible(p, m, machine_exam_map):
+#                     continue
+#                 # 检查业务规则
+#                 if not is_rule_feasible(p, m, date_obj):
+#                     continue
+
+#                 # 只要当天容量够一个人用
+#                 if p['duration'] <= daily_work_seconds(date_obj):
+#                     cost, tcnt = compute_column_cost(patients, [i], date_obj)
+#                     columns.append(Column(col_id, m, date_obj, [i], cost, tcnt))
+#                     col_id += 1
+#                     assigned = True
+#                     break 
+#             if assigned:
+#                 break
+        
+#         # 修复：不再强制生成可能冲突的“兜底列”。
+#         # 如果这里找不到列，后面的RMP会使用松弛变量（Slack）来处理该患者，
+#         # 并报告该患者“未排程”，而不是让程序崩溃。
+
+#     return columns, col_id
+
+
+# # ===================== 第二步：主问题 (RMP LP) =====================
+
+# def solve_rmp_lp(columns: List[Column], num_patients: int):
+#     """
+#     求解限制主问题 (Restricted Master Problem) 的线性规划松弛。
+#     目标：min sum(cost_c * x_c) + sum(UNSCHEDULED_PENALTY * slack_i)
+#     约束1 (覆盖): sum(x_c) + slack_i == 1  (允许 slack_i=1 代表未被覆盖)
+#     约束2 (机器): sum(x_c) <= 1
+#     """
+#     solver = pywraplp.Solver.CreateSolver("GLOP")
+#     if solver is None:
+#         raise RuntimeError("无法创建 GLOP 求解器，请检查 ortools 是否安装正确。")
+
+#     # 定义变量 x_c (0 <= x_c <= 1, 连续变量)
+#     x = []
+#     for c in columns:
+#         x.append(solver.NumVar(0.0, 1.0, f"x_{c.col_id}"))
+
+#     # 定义松弛变量 (Slack Variables)，用于处理无法覆盖的患者
+#     slacks = []
+#     for i in range(num_patients):
+#         slacks.append(solver.NumVar(0.0, 1.0, f"slack_{i}"))
+
+#     # 1. 患者覆盖约束
+#     patient_cons = []
+#     cols_by_patient = [[] for _ in range(num_patients)]
+#     for idx_c, c in enumerate(columns):
+#         for i in c.patients_idx:
+#             cols_by_patient[i].append(idx_c)
+
+#     for i in range(num_patients):
+#         # sum(x_c) + slack_i = 1
+#         # 如果所有 x_c 都是 0，那么 slack_i 必须是 1，这会触发巨大的惩罚
+#         ct = solver.Constraint(1.0, 1.0, f"cover_p_{i}")
+#         for idx_c in cols_by_patient[i]:
+#             ct.SetCoefficient(x[idx_c], 1.0)
+#         # 加上松弛变量
+#         ct.SetCoefficient(slacks[i], 1.0)
+#         patient_cons.append(ct)
+
+#     # 2. 机器容量约束
+#     machday_cons = {}
+#     cols_by_machday = defaultdict(list)
+#     for idx_c, c in enumerate(columns):
+#         cols_by_machday[(c.machine_id, c.date)].append(idx_c)
+
+#     for (m, d), idx_list in cols_by_machday.items():
+#         ct = solver.Constraint(0.0, 1.0, f"machday_{m}_{d}")
+#         for idx_c in idx_list:
+#             ct.SetCoefficient(x[idx_c], 1.0)
+#         machday_cons[(m, d)] = ct
+
+#     # 3. 目标函数
+#     obj = solver.Objective()
+#     # 正常列的成本
+#     for idx_c, c in enumerate(columns):
+#         obj.SetCoefficient(x[idx_c], float(c.cost))
+#     # 松弛变量的成本（巨额惩罚）
+#     for i in range(num_patients):
+#         obj.SetCoefficient(slacks[i], UNSCHEDULED_PENALTY)
+        
+#     obj.SetMinimization()
+
+#     status = solver.Solve()
+#     if status != pywraplp.Solver.OPTIMAL:
+#         print(f"⚠️ RMP LP 状态: {status} (可能使用松弛变量)")
+
+#     return solver, x, patient_cons, machday_cons
+
+
+# # ===================== 第三步：子问题 (Pricing) =====================
+
+# def heuristic_pricing(
+#     patients: List[dict],
+#     machine_exam_map,
+#     start_date,
+#     search_days,
+#     dual_p: List[float],
+#     dual_md: Dict[Tuple[int, datetime.date], float],
+#     next_col_id: int,
+#     max_new_cols: int = 80,
+#     candidate_patients_topk: int = 200
+# ):
+#     """
+#     启发式 Pricing 算法
+#     """
+#     num_patients = len(patients)
+
+#     # 1. 筛选高价值患者：按对偶值降序排列
+#     ranked = sorted(range(num_patients), key=lambda i: dual_p[i], reverse=True)
+#     ranked = ranked[:min(candidate_patients_topk, num_patients)]
+
+#     new_columns: List[Column] = []
+#     col_id = next_col_id
+
+#     for d_off in range(search_days):
+#         date_obj = start_date.date() + timedelta(days=d_off)
+#         cap = daily_work_seconds(date_obj)
+#         if cap <= 0:
+#             continue
+
+#         for m in range(MACHINE_COUNT):
+#             sigma = dual_md.get((m, date_obj), 0.0)
+
+#             feasible = []
+#             for i in ranked:
+#                 p = patients[i]
+#                 if p['duration'] > cap:
+#                     continue
+#                 if not is_device_feasible(p, m, machine_exam_map):
+#                     continue
+#                 if not is_rule_feasible(p, m, date_obj):
+#                     continue
+#                 if (date_obj - p['reg_date']).days < 0:
+#                     continue
+#                 feasible.append(i)
+
+#             if not feasible:
+#                 continue
+
+#             feasible.sort(
+#                 key=lambda i: (dual_p[i] / max(1, patients[i]['duration'])),
+#                 reverse=True
+#             )
+
+#             packed = []
+#             used = 0
+            
+#             for i in feasible:
+#                 dur = patients[i]['duration']
+#                 if used + dur > cap:
+#                     continue 
+#                 packed.append(i)
+#                 used += dur
+#                 if used >= cap * 0.90:
+#                     break
+
+#             if not packed:
+#                 continue
+
+#             real_cost, tcnt = compute_column_cost(patients, packed, date_obj)
+#             sum_patient_dual = sum(dual_p[i] for i in packed)
+#             reduced_cost = real_cost - sum_patient_dual - sigma
+
+#             if reduced_cost < -1e-6:
+#                 new_columns.append(Column(col_id, m, date_obj, packed, real_cost, tcnt))
+#                 col_id += 1
+#                 if len(new_columns) >= max_new_cols:
+#                     return new_columns, col_id
+
+#     return new_columns, col_id
+
+
+# # ===================== 第四步：求解整数解 (MIP) =====================
+
+# def solve_rmp_mip(columns: List[Column], num_patients: int):
+#     """
+#     求解最终整数规划 (MIP)，同样包含松弛变量以防无解。
+#     """
+#     solver = pywraplp.Solver.CreateSolver("CBC")
+#     if solver is None:
+#         raise RuntimeError("无法创建 CBC 求解器。")
+
+#     # 列变量 (Binary)
+#     x = []
+#     for c in columns:
+#         x.append(solver.BoolVar(f"x_{c.col_id}"))
+    
+#     # 松弛变量 (Binary: 1代表该患者被放弃)
+#     slacks = []
+#     for i in range(num_patients):
+#         slacks.append(solver.BoolVar(f"slack_{i}"))
+
+#     # 1. 患者覆盖
+#     cols_by_patient = [[] for _ in range(num_patients)]
+#     for idx_c, c in enumerate(columns):
+#         for i in c.patients_idx:
+#             cols_by_patient[i].append(idx_c)
+
+#     for i in range(num_patients):
+#         ct = solver.Constraint(1.0, 1.0, f"cover_p_{i}")
+#         for idx_c in cols_by_patient[i]:
+#             ct.SetCoefficient(x[idx_c], 1.0)
+#         # 加上松弛变量
+#         ct.SetCoefficient(slacks[i], 1.0)
+
+#     # 2. 机器约束
+#     cols_by_machday = defaultdict(list)
+#     for idx_c, c in enumerate(columns):
+#         cols_by_machday[(c.machine_id, c.date)].append(idx_c)
+
+#     for (m, d), idx_list in cols_by_machday.items():
+#         ct = solver.Constraint(0.0, 1.0, f"machday_{m}_{d}")
+#         for idx_c in idx_list:
+#             ct.SetCoefficient(x[idx_c], 1.0)
+
+#     # 3. 目标
+#     obj = solver.Objective()
+#     for idx_c, c in enumerate(columns):
+#         obj.SetCoefficient(x[idx_c], float(c.cost))
+#     # 松弛变量成本
+#     for i in range(num_patients):
+#         obj.SetCoefficient(slacks[i], UNSCHEDULED_PENALTY)
+    
+#     obj.SetMinimization()
+
+#     print("开始求解最终整数规划...")
+#     solver.SetTimeLimit(60000) 
+#     status = solver.Solve()
+    
+#     chosen = []
+#     unscheduled_count = 0
+    
+#     if status in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
+#         for i, var in enumerate(x):
+#             if var.solution_value() > 0.5:
+#                 chosen.append(columns[i])
+#         for i, var in enumerate(slacks):
+#             if var.solution_value() > 0.5:
+#                 unscheduled_count += 1
+#     else:
+#         print(f"⚠️ RMP MIP 依然未找到解，status={status}")
+        
+#     print(f"MIP 求解完成。放弃治疗的患者数: {unscheduled_count}")
+#     return chosen
+
+
+# # ===================== 结果导出与处理 =====================
+
+# def build_final_schedule_from_columns(patients: List[dict], chosen_cols: List[Column]):
+#     """
+#     将选中的列（抽象的Machine-Day集合）转换为具体的秒级时间表。
+#     """
+#     final = []
+#     SWITCH_GAP_SEC = 60 
+
+#     for col in chosen_cols:
+#         date_obj = col.date
+#         m_id = col.machine_id
+
+#         idxs = sorted(col.patients_idx, key=lambda i: patients[i]['reg_datetime'])
+
+#         cur_sec = 0
+#         prev_type = None
+
+#         for i in idxs:
+#             p = patients[i]
+#             if prev_type is not None and p['exam_type'] != prev_type:
+#                 cur_sec += SWITCH_GAP_SEC
+
+#             start_dt = datetime.combine(date_obj, WORK_START) + timedelta(seconds=cur_sec)
+#             end_dt = start_dt + timedelta(seconds=p['duration'])
+
+#             record = {
+#                 'patient_id': p['id'],
+#                 'exam_type': p['exam_type'],
+#                 'reg_date': p['reg_date'],
+#                 'is_self_selected': p['is_self_selected'],
+#                 'machine_id': m_id + 1,
+#                 'date': date_obj,
+#                 'start_time': start_dt.time(),
+#                 'end_time': end_dt.time(),
+#                 'wait_days': (date_obj - p['reg_date']).days
+#             }
+#             final.append(record)
+
+#             cur_sec += p['duration']
+#             prev_type = p['exam_type']
+
+#     final.sort(key=lambda x: (x['machine_id'], x['date'], x['start_time']))
+#     return final
+
+# def evaluate_score(final_schedule: List[dict], machine_exam_map):
+#     """
+#     对最终结果进行评分统计
+#     """
+#     if not final_schedule:
+#         return 0, {}
+
+#     total_score = 0
+#     details = defaultdict(int)
+
+#     prev_machine = -1
+#     prev_exam_type = None
+#     prev_date = None
+
+#     for item in final_schedule:
+#         wait_days = (item['date'] - item['reg_date']).days
+#         if wait_days < 0:
+#             total_score -= LOGICAL_PENALTY
+#             details['logical_violation'] += 1
+#             wait_cost = 0
+#         else:
+#             weight = SELF_SELECTED_PENALTY if item['is_self_selected'] else NON_SELF_PENALTY
+#             wait_cost = wait_days * weight
+
+#         total_score -= wait_cost
+#         details['wait_cost'] += wait_cost
+
+#         if (item['machine_id'] == prev_machine and item['date'] == prev_date):
+#             if item['exam_type'] != prev_exam_type:
+#                 total_score -= TRANSITION_PENALTY
+#                 details['transition_cost'] += TRANSITION_PENALTY
+#                 details['transition_count'] += 1
+
+#         prev_machine = item['machine_id']
+#         prev_exam_type = item['exam_type']
+#         prev_date = item['date']
+
+#         weekday = item['date'].isoweekday()
+#         m_idx = item['machine_id'] - 1
+        
+#         rule_violated = False
+#         allowed = machine_exam_map.get(m_idx, set())
+        
+#         if allowed and (item['exam_type'] not in allowed):
+#             rule_violated = True
+#             details['device_violation'] += 1
+
+#         exam_name = str(item['exam_type'])
+#         if '心脏' in exam_name and not ((weekday == 2 or weekday == 4) and m_idx == 3):
+#             rule_violated = True
+#             details['heart_violation'] += 1
+        
+#         if rule_violated:
+#             total_score -= DEVICE_PENALTY
+
+#     return total_score, details
+
+# def export_excel(final_schedule: List[dict], filename: str, score_data=None):
+#     if not final_schedule:
+#         print("无数据导出。")
+#         return
+
+#     df = pd.DataFrame(final_schedule)
+#     cols = [
+#         'patient_id', 'exam_type', 'reg_date', 'is_self_selected',
+#         'machine_id', 'date', 'start_time', 'end_time', 'wait_days'
+#     ]
+#     for c in cols:
+#         if c not in df.columns:
+#             df[c] = ''
+#     df = df[cols]
+
+#     with pd.ExcelWriter(filename) as writer:
+#         df.to_excel(writer, sheet_name='详细排程', index=False)
+        
+#         if 'date' in df.columns:
+#             stats = df.groupby('date').size().reset_index(name='每日检查量')
+#             stats.to_excel(writer, sheet_name='统计', index=False)
+
+#         if score_data:
+#             score, details = score_data
+#             score_items = [['Total Score', score]] + [[k, v] for k, v in details.items()]
+#             pd.DataFrame(score_items, columns=['Metric', 'Value']).to_excel(
+#                 writer, sheet_name='评分报告', index=False
+#             )
+
+#     print(f"✅ 排程文件已生成: {filename}")
+
+
+# # ===================== 主流程入口 =====================
+
+# def column_generation_solve(
+#     patients: List[dict],
+#     machine_exam_map,
+#     start_date: datetime,
+#     search_days: int = SEARCH_DAYS,
+#     max_iters: int = 30,
+#     max_new_cols_per_iter: int = 80
+# ):
+#     print(">>> 启动列生成算法 (Column Generation) <<<")
+    
+#     # 1. 初始化
+#     columns, next_col_id = build_initial_columns(
+#         patients, machine_exam_map, start_date, search_days
+#     )
+#     print(f"初始列数: {len(columns)}")
+
+#     # 2. 迭代 CG Loop
+#     for it in range(1, max_iters + 1):
+#         print(f"\n--- Iteration {it}/{max_iters} ---")
+
+#         # 求解 RMP
+#         solver_lp, x_vars, patient_cons, machday_cons = solve_rmp_lp(
+#             columns, len(patients)
+#         )
+
+#         # 提取对偶值
+#         dual_p = [ct.dual_value() for ct in patient_cons]
+#         dual_md = {k: ct.dual_value() for k, ct in machday_cons.items()}
+
+#         # 求解 Pricing 寻找新列
+#         new_cols, next_col_id = heuristic_pricing(
+#             patients,
+#             machine_exam_map,
+#             start_date,
+#             search_days,
+#             dual_p,
+#             dual_md,
+#             next_col_id,
+#             max_new_cols=max_new_cols_per_iter
+#         )
+
+#         if not new_cols:
+#             print("没有发现更优的列 (Negative Reduced Cost)，迭代提前结束。")
+#             break
+
+#         columns.extend(new_cols)
+#         print(f"本轮新增有效列: {len(new_cols)}，当前总列池: {len(columns)}")
+
+#     # 3. 求解最终整数解
+#     print("\n>>> 进入整数规划阶段 (Integer RMP) <<<")
+#     chosen_cols = solve_rmp_mip(columns, len(patients))
+#     print(f"最终选中列数: {len(chosen_cols)}")
+
+#     return chosen_cols
+
+# def main():
+#     current_dir = os.path.dirname(os.path.abspath(__file__))
+    
+#     # === 输入文件路径配置 (请修改这里) ===
+#     patient_file = os.path.join(current_dir, '实验数据6.1small - 副本.xlsx')
+#     duration_file = os.path.join(current_dir, '程序使用实际平均耗时3 - 副本.xlsx')
+#     device_constraint_file = os.path.join(current_dir, '设备限制4.xlsx')
+
+#     # 检查文件是否存在
+#     missing_files = [f for f in [patient_file, duration_file, device_constraint_file] if not os.path.exists(f)]
+#     if missing_files:
+#         print(f"❌ 错误：找不到以下数据文件，请确认路径:\n{missing_files}")
+#         return
+
+#     # 1. 导入数据
+#     patients = import_data(patient_file, duration_file)
+#     machine_exam_map = import_device_constraints(device_constraint_file)
+
+#     # 估算一周内最大单日容量（秒）
+#     caps = [daily_work_seconds(START_DATE.date() + timedelta(days=i)) for i in range(7)]
+#     cap_max = max(caps)
+
+#     too_long = [p for p in patients if p['duration'] > cap_max]
+#     print("❌ 单次检查耗时超过任意单日容量的患者数:", len(too_long))
+#     print("cap_max(sec)=", cap_max, "示例duration=", [p['duration'] for p in too_long[:10]])
+
+
+#     # 2. 运行求解
+#     chosen_cols = column_generation_solve(
+#         patients,
+#         machine_exam_map,
+#         start_date=START_DATE,
+#         search_days=SEARCH_DAYS,
+#         max_iters=25,               # 最大迭代次数
+#         max_new_cols_per_iter=60    # 每次迭代生成的最大列数
+#     )
+
+#     # 3. 结果处理
+#     final_schedule = build_final_schedule_from_columns(patients, chosen_cols)
+#     score, details = evaluate_score(final_schedule, machine_exam_map)
+
+#     # 计算未排程人数
+#     scheduled_pids = set(item['patient_id'] for item in final_schedule)
+#     all_pids = set(p['id'] for p in patients)
+#     missing_count = len(all_pids) - len(scheduled_pids)
+
+#     print("\n" + "=" * 50)
+#     print("📊 最终结果统计")
+#     print("=" * 50)
+#     print(f"总评分 (负分制): {score:,.0f}")
+#     print(f"等待成本: {details.get('wait_cost', 0):,.0f}")
+#     print(f"换模成本: {details.get('transition_cost', 0):,.0f}")
+#     print(f"未排程人数(通过松弛变量丢弃): {missing_count} 人")
+    
+#     # 4. 导出Excel
+#     out_dir = os.path.join(current_dir, 'output_schedules')
+#     os.makedirs(out_dir, exist_ok=True)
+#     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+#     out_xlsx = os.path.join(out_dir, f'schedule_result_{ts}.xlsx')
+
+#     export_excel(final_schedule, out_xlsx, score_data=(score, details))
+
+# if __name__ == "__main__":
+#     main()
+
+# column_generation_routeA.py
+# ============================================================
+# Route A: Proper Column Generation for Machine-Day Patterns
+# 语义：
+#   - 一列 = (machine, day) 的“完整可执行日程模式 pattern”
+#   - Master: 每个 machine-day 最多选 1 列
+#   - Pricing/Init: 为每个 machine-day 生成多个风格的可行 pattern
+#   - Slack: 允许丢弃患者（高惩罚）避免无解
+# ============================================================
+
+
+#最后一步运行过慢
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import List, Dict, Tuple, Set, Optional
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-import os
 from collections import defaultdict
-import traceback
+import os
 import re
-import multiprocessing
-from ortools.sat.python import cp_model
+import traceback
+import random
 
-# ===================== 全局常量 =====================
+from ortools.linear_solver import pywraplp
+
+
+# ===================== 全局配置与常量 =====================
+
 WEEKDAY_END_HOURS = {1: 5.3, 2: 4.9, 3: 3.5, 4: 3.8, 5: 5.7, 6: 1.7, 7: 1.7}
+
 WORK_START_STR = '07:00'
 WORK_START = datetime.strptime(WORK_START_STR, '%H:%M').time()
 
-START_DATE = datetime(2025, 1, 1, 7, 0)  # 你可按需调整
+START_DATE = datetime(2025, 1, 1, 7, 0)
 MACHINE_COUNT = 6
+SEARCH_DAYS = 30
 
-# 求解器配置
-BATCH_SIZE = 100          # ✅ 仅按患者个数分块
-SEARCH_DAYS = 1
-SOLVER_TIME_LIMIT = 60000000   # 每批求解时间上限(秒)
+# 换模间隙（秒）
+SWITCH_GAP_SEC = 60
 
-# ===================== 评分常量（用于 evaluate，可保留你的口径） =====================
+# 成本权重
 TRANSITION_PENALTY = 20000
 SELF_SELECTED_PENALTY = 8000
 NON_SELF_PENALTY = 800
 DEVICE_PENALTY = 500000
 LOGICAL_PENALTY = 10000
 
-# ===================== ✅ 秒级等待目标权重 =====================
-# 不引入“同类型聚类”软目标
-WAIT_WEIGHT_SELF = 5
-WAIT_WEIGHT_NON = 1
+# Slack 惩罚（必须巨大）
+UNSCHEDULED_PENALTY = 1e9
+
+# Pricing 相关参数
+MAX_ITERS = 25
+MAX_NEW_COLS_PER_ITER = 80
+CANDIDATE_PATIENTS_TOPK = 400   # 适当放大，增强 pattern 构造质量
+
+# 初始化 pattern 每个 machine-day 生成多少种风格
+INIT_PATTERNS_PER_MD = 3
 
 
-# ===================== 数据导入工具 =====================
+# ===================== 工具函数 =====================
 
 def clean_exam_name(name):
-    """标准化检查项目名称"""
     s = str(name).strip().lower()
     s = re.sub(r'[（）]', lambda x: '(' if x.group() == '（' else ')', s)
     s = re.sub(r'[^\w()-]', '', s)
     return s.replace('_', '-').replace(' ', '')
 
 def safe_read_excel(file_path, sheet_name=0):
-    """兼容读取不同 Excel 引擎"""
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"文件不存在: {file_path}")
+
     if file_path.endswith('.xlsx'):
         engines = ['openpyxl', 'odf']
     elif file_path.endswith('.xls'):
         engines = ['xlrd']
     else:
         engines = ['openpyxl', 'xlrd', 'odf']
+
     for engine in engines:
         try:
             return pd.read_excel(file_path, engine=engine, sheet_name=sheet_name)
         except Exception:
             continue
+
     return pd.read_excel(file_path, sheet_name=sheet_name)
 
+
+# ===================== 数据导入 =====================
+
 def import_data(patient_file, duration_file):
-    """
-    导入患者 + 耗时，并将耗时统一为“秒”。
-    ✅ 全局只按 reg_datetime 排序（登记时间决定骨架）
-    """
-    print("正在导入患者数据...")
-    try:
-        duration_df = safe_read_excel(duration_file)
-        duration_df['cleaned_exam'] = duration_df['检查项目'].apply(clean_exam_name)
-        exam_durations = duration_df.set_index('cleaned_exam')['实际平均耗时'].to_dict()
+    print(f"正在读取患者数据: {patient_file}")
+    duration_df = safe_read_excel(duration_file)
+    duration_df['cleaned_exam'] = duration_df['检查项目'].apply(clean_exam_name)
+    exam_durations = duration_df.set_index('cleaned_exam')['实际平均耗时'].to_dict()
 
-        patient_df = safe_read_excel(patient_file)
-        patients = []
+    patient_df = safe_read_excel(patient_file)
+    required_cols = ['id', '登记日期', '检查项目']
+    for c in required_cols:
+        if c not in patient_df.columns:
+            raise ValueError(f"患者表缺少必要列: {c}")
 
-        for _, row in patient_df.iterrows():
-            if pd.isnull(row.get('id')) or pd.isnull(row.get('登记日期')):
-                continue
+    patients = []
+    for _, row in patient_df.iterrows():
+        raw_id = row['id']
+        reg_dt = pd.to_datetime(row['登记日期'])
+        exam_raw = row['检查项目']
+        exam = clean_exam_name(exam_raw)
 
-            raw_id = str(row['id']).strip()
-            reg_dt = pd.to_datetime(row['登记日期'])
+        dur_min = exam_durations.get(exam, None)
+        if dur_min is None:
+            dur_min = 20.0
 
-            cid = (raw_id, reg_dt.strftime('%Y%m%d'))
-            exam_type = clean_exam_name(row['检查项目'])
+        duration_sec = int(round(float(dur_min) * 60))
 
-            # ---- 耗时处理：分钟 -> 秒（允许小数） ----
-            val = exam_durations.get(exam_type, 15.0)
+        is_self = False
+        if '是否自选时间' in patient_df.columns:
             try:
-                duration_raw_min = float(val)
+                is_self = bool(row['是否自选时间'])
             except Exception:
-                duration_raw_min = 15.0
-
-            duration_sec = int(round(duration_raw_min * 60))
-            duration_sec = max(1, duration_sec)
-
-            is_self_selected = (row.get('是否自选时间') == '自选时间')
-
-            p = {
-                'id': raw_id,
-                'cid': cid,
-                'exam_type': exam_type,
-                'duration': duration_sec,
-                'reg_date': reg_dt.date(),
-                'reg_datetime': reg_dt,
-                'is_self_selected': is_self_selected,
-                'original_row': row
-            }
-            patients.append(p)
-
-        # ✅ 只按登记时间排序
-        patients.sort(key=lambda x: x['reg_datetime'])
-
-        print(f"成功导入 {len(patients)} 名患者。")
-        return patients
-
-    except Exception as e:
-        print(f"数据导入错误: {e}")
-        traceback.print_exc()
-        raise
-
-def import_device_constraints(file_path):
-    """导入“设备-检查项目可做映射”"""
-    print("正在导入设备限制...")
-    try:
-        df = safe_read_excel(file_path)
-        machine_exam_map = defaultdict(set)
-        for _, row in df.iterrows():
-            mid = int(row['设备']) - 1
-            exam = clean_exam_name(row['检查项目'])
-            machine_exam_map[mid].add(exam)
-        return machine_exam_map
-    except Exception as e:
-        print(f"导入设备限制数据错误: {e}")
-        traceback.print_exc()
-        raise
-
-
-# ===================== 核心算法：CP-SAT 滚动调度器 =====================
-
-class RollingHorizonScheduler:
-    def __init__(self, patients, machine_exam_map, start_date):
-        self.all_patients = patients
-        self.machine_exam_map = machine_exam_map
-        self.global_start_date = start_date
-
-        # 记录每台机器每一天已经被占用到的“秒数”
-        self.machine_occupied_until = defaultdict(int)
-
-        # 记录每台机器每一天“最后一个检查的类型” (用于批次间换模判断)
-        self.machine_last_exam_type = defaultdict(lambda: None)
-
-        self.final_schedule = []
-
-        # 预计算每天的工作时长（秒）
-        self.daily_work_seconds = {}
-        for d in range(1, 8):
-            hours_avail = 15.0 - WEEKDAY_END_HOURS.get(d, 0)
-            self.daily_work_seconds[d] = int(round(hours_avail * 3600))
-
-    def get_work_window(self, date_obj):
-        weekday = date_obj.isoweekday()
-        limit = self.daily_work_seconds.get(weekday, 0)
-        return 0, limit
-
-    # ✅ 仅按人数分批（保持登记时间排序后的顺序）
-    def build_count_batches(self):
-        patients = self.all_patients
-        if not patients:
-            return []
-        return [patients[i:i + BATCH_SIZE] for i in range(0, len(patients), BATCH_SIZE)]
-
-    def solve(self):
-        num_workers = multiprocessing.cpu_count()
-        total_patients = len(self.all_patients)
-
-        print(f"\n🚀 开始滚动优化（按人数分块 + 登记时间骨架 + 等待秒级目标）")
-        print(f"🔥 已启用全CPU核心加速: {num_workers} 线程并行搜索")
-        print(f"总计 {total_patients} 名患者")
-        print(f"单批人数上限: {BATCH_SIZE}")
-
-        batches = self.build_count_batches()
-        print(f"共构建 {len(batches)} 个批次。")
-
-        for bi, batch_patients in enumerate(batches, 1):
-            print(f"\n>>> 处理批次 {bi}/{len(batches)}: 本批 {len(batch_patients)} 人 "
-                  f"(登记时间从 {batch_patients[0]['reg_datetime']} 到 {batch_patients[-1]['reg_datetime']})")
-            self.solve_batch(batch_patients, num_workers)
-
-        print("\n所有批次处理完毕。")
-
-    def solve_batch(self, batch_patients, num_workers):
-        model = cp_model.CpModel()
-
-        # 变量存储
-        intervals = {}  # (p_idx, m_id, day_offset) -> interval_var
-        presences = {}  # (p_idx, m_id, day_offset) -> bool_var
-        starts = {}     # (p_idx, m_id, day_offset) -> int_var
-        ends = {}       # (p_idx, m_id, day_offset) -> int_var
-        waits = {}      # (p_idx, m_id, day_offset) -> int_var  ✅ 等待秒变量
-        wait_mins = {}  # (p_idx, m_id, day_offset) -> int_var  ✅ 等待分钟变量（仅用于目标）
-
-        p_data = {}
-
-        # 辅助结构：按“机器-天”归类所有可能的任务
-        machine_tasks = defaultdict(list)
-
-        # 等待秒上界（安全冗余）
-        max_wait_ub = (SEARCH_DAYS + 2) * 86400
-        max_wait_min_ub = (SEARCH_DAYS + 2) * 1440  # 分钟上界
-
-        # 1) 建模
-        for p_idx, p in enumerate(batch_patients):
-            p_data[p_idx] = p
-            possible_pres = []
-
-            earliest_date = max(p['reg_date'], self.global_start_date.date())
-            start_day_offset = (earliest_date - self.global_start_date.date()).days
-
-            exam_name = str(p['exam_type'])
-            is_heart = '心脏' in exam_name
-            is_angio = '造影' in exam_name
-            is_contrast = '增强' in exam_name
-
-            # ✅ 登记时间相对全局起点的“绝对秒”
-            reg_abs_sec = int(round((p['reg_datetime'] - self.global_start_date).total_seconds()))
-            reg_abs_sec = max(0, reg_abs_sec)
-
-            for d in range(SEARCH_DAYS):
-                current_day_offset = start_day_offset + d
-                current_date = self.global_start_date.date() + timedelta(days=current_day_offset)
-                day_start_sec, day_end_sec = self.get_work_window(current_date)
-                if day_end_sec <= 0:
-                    continue
-
-                weekday_iso = current_date.isoweekday()
-
-                # ✅ 同一天不得早于登记时刻（相对 WORK_START 的秒下界）
-                reg_time_lb = 0
-                if current_date == p['reg_datetime'].date():
-                    reg_t = p['reg_datetime'].time()
-                    reg_dt_day = datetime.combine(current_date, reg_t)
-                    work_dt_day = datetime.combine(current_date, WORK_START)
-                    reg_time_lb = int(round((reg_dt_day - work_dt_day).total_seconds()))
-                    reg_time_lb = max(0, reg_time_lb)
-
-                for m_id in range(MACHINE_COUNT):
-
-                    # --- 设备与规则过滤 ---
-                    if p['exam_type'] not in self.machine_exam_map[m_id]:
-                        continue
-                    if is_heart and (m_id != 3 or weekday_iso not in [2, 4]):
-                        continue
-                    if is_angio and (m_id != 1 or weekday_iso not in [1, 3, 5]):
-                        continue
-                    if is_contrast and weekday_iso in [6, 7]:
-                        continue
-
-                    # ✅ 不在建模中加入任何 60s 换模间隙
-                    occupied_until = self.machine_occupied_until[(m_id, current_date)]
-
-                    # 空间检查（仅基于占用与时长）
-                    if occupied_until + p['duration'] > day_end_sec:
-                        continue
-
-                    suffix = f"_p{p_idx}_m{m_id}_d{current_day_offset}"
-                    is_present = model.NewBoolVar(f"pres{suffix}")
-                    presences[(p_idx, m_id, current_day_offset)] = is_present
-
-                    # ✅ Start 下界 = max(已占用, 登记当天时刻下界)
-                    earliest_start_lb = max(occupied_until, reg_time_lb)
-
-                    start_var = model.NewIntVar(
-                        earliest_start_lb,
-                        day_end_sec - p['duration'],
-                        f"start{suffix}"
-                    )
-                    end_var = model.NewIntVar(
-                        earliest_start_lb + p['duration'],
-                        day_end_sec,
-                        f"end{suffix}"
-                    )
-
-                    interval_var = model.NewOptionalIntervalVar(
-                        start_var, p['duration'], end_var, is_present, f"interval{suffix}"
-                    )
-
-                    key = (p_idx, m_id, current_day_offset)
-                    intervals[key] = interval_var
-                    starts[key] = start_var
-                    ends[key] = end_var
-                    possible_pres.append(is_present)
-
-                    # ✅ 等待秒变量（线性化）
-                    wait_var = model.NewIntVar(0, max_wait_ub, f"wait{suffix}")
-                    waits[key] = wait_var
-
-                    scheduled_start_abs = current_day_offset * 86400 + start_var
-                    model.Add(wait_var == scheduled_start_abs - reg_abs_sec).OnlyEnforceIf(is_present)
-                    model.Add(wait_var == 0).OnlyEnforceIf(is_present.Not())
-
-                    # ✅ 等待分钟变量（仅用于目标，分钟级粒度）
-                    wait_min_var = model.NewIntVar(0, max_wait_min_ub, f"waitmin{suffix}")
-                    wait_mins[key] = wait_min_var
-                    # wait_min = wait_sec // 60
-                    model.AddDivisionEquality(wait_min_var, wait_var, 60)
-
-                    # 收集任务（用于 NoOverlap & 目标中的换模计数代理）
-                    machine_tasks[(m_id, current_day_offset)].append({
-                        'p_idx': p_idx,
-                        'type': p['exam_type'],
-                        'start': start_var,
-                        'end': end_var,
-                        'pres': is_present
-                    })
-
-            if possible_pres:
-                model.Add(sum(possible_pres) == 1)
-
-        # 2) 约束
-        for (m_id, d_offset), task_list in machine_tasks.items():
-            # A. 不重叠
-            current_intervals = [
-                intervals[(t['p_idx'], m_id, d_offset)] for t in task_list
-            ]
-            model.AddNoOverlap(current_intervals)
-
-            # ✅ 彻底取消批内 60s 换模硬约束
-            # self._add_intra_batch_gap_constraints(model, task_list)
-
-        # 3) 目标
-        # ✅ 等待时间（分钟级目标，秒级变量仍保留）
-        obj_terms = []
-        for key, wait_min_var in wait_mins.items():
-            p_idx, _, _ = key
-            p = p_data[p_idx]
-            w = WAIT_WEIGHT_SELF if p['is_self_selected'] else WAIT_WEIGHT_NON
-            obj_terms.append(wait_min_var * w)
-
-        # ✅ 换模个数代理：每台机器每天使用的“检查类型数 - 1”
-        switch_proxy_vars = []
-        for (m_id, d_offset), task_list in machine_tasks.items():
-            if not task_list:
-                continue
-
-            # 当天是否有任何任务被选中
-            all_pres = [t['pres'] for t in task_list]
-            any_present = model.NewBoolVar(f"any_m{m_id}_d{d_offset}")
-            model.AddMaxEquality(any_present, all_pres)
-
-            # 统计该机该日被使用的“类型数”
-            type_to_pres = defaultdict(list)
-            for t in task_list:
-                type_to_pres[str(t['type'])].append(t['pres'])
-
-            used_bools = []
-            for idx, (_tname, pres_list) in enumerate(type_to_pres.items()):
-                used = model.NewBoolVar(f"used_m{m_id}_d{d_offset}_{idx}")
-                if len(pres_list) == 1:
-                    model.Add(used == pres_list[0])
-                else:
-                    model.AddMaxEquality(used, pres_list)
-                used_bools.append(used)
-
-            tcount = len(used_bools)
-            type_used_count = model.NewIntVar(0, tcount, f"type_cnt_m{m_id}_d{d_offset}")
-            model.Add(type_used_count == sum(used_bools))
-
-            # 换模个数代理 = max(0, type_used_count - 1)
-            switch_proxy = model.NewIntVar(0, max(0, tcount - 1), f"sw_m{m_id}_d{d_offset}")
-            model.Add(switch_proxy == type_used_count - 1).OnlyEnforceIf(any_present)
-            model.Add(switch_proxy == 0).OnlyEnforceIf(any_present.Not())
-
-            switch_proxy_vars.append(switch_proxy)
-
-        # 目标：等待(分钟级) + 换模个数 * 系数
-        if switch_proxy_vars:
-            obj_terms.append(sum(switch_proxy_vars) * TRANSITION_PENALTY)
-
-        if obj_terms:
-            model.Minimize(sum(obj_terms))
-
-        # 4) 求解
-        solver = cp_model.CpSolver()
-        solver.parameters.num_search_workers = num_workers
-        solver.parameters.max_time_in_seconds = SOLVER_TIME_LIMIT
-        solver.parameters.log_search_progress = False
-
-        status = solver.Solve(model)
-
-        if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            print(f"  -> 求解成功 ({solver.StatusName(status)})")
-
-            batch_results_per_machine_day = defaultdict(list)
-
-            for key, is_present in presences.items():
-                if solver.Value(is_present):
-                    p_idx, m_id, day_offset = key
-                    start_val = solver.Value(starts[key])
-                    end_val = solver.Value(ends[key])
-                    p = p_data[p_idx]
-
-                    real_date = self.global_start_date.date() + timedelta(days=day_offset)
-
-                    record = {
-                        'patient_id': p['id'],
-                        'exam_type': p['exam_type'],
-                        'reg_date': p['reg_date'],
-                        'reg_datetime': p['reg_datetime'],
-                        'is_self_selected': p['is_self_selected'],
-                        'machine_id': m_id + 1,
-                        'date': real_date,
-                        'start_time': (datetime.combine(real_date, WORK_START) + timedelta(seconds=start_val)).time(),
-                        'end_time': (datetime.combine(real_date, WORK_START) + timedelta(seconds=end_val)).time(),
-                        'wait_days': (real_date - p['reg_date']).days
-                    }
-                    self.final_schedule.append(record)
-                    batch_results_per_machine_day[(m_id, real_date)].append((end_val, p['exam_type']))
-
-            # 批次间状态更新（保持不变）
-            for (m_id, d_date), results in batch_results_per_machine_day.items():
-                max_end_time, last_exam_type = max(results, key=lambda x: x[0])
-
-                self.machine_occupied_until[(m_id, d_date)] = max(
-                    self.machine_occupied_until[(m_id, d_date)],
-                    max_end_time
-                )
-                self.machine_last_exam_type[(m_id, d_date)] = last_exam_type
-
-        else:
-            print("  -> 求解失败，无可行解")
-
-    # def solve_batch(self, batch_patients, num_workers):
-    #     model = cp_model.CpModel()
-
-    #     # 变量存储
-    #     intervals = {}  # (p_idx, m_id, day_offset) -> interval_var
-    #     presences = {}  # (p_idx, m_id, day_offset) -> bool_var
-    #     starts = {}     # (p_idx, m_id, day_offset) -> int_var
-    #     ends = {}       # (p_idx, m_id, day_offset) -> int_var
-    #     waits = {}      # (p_idx, m_id, day_offset) -> int_var  ✅ 等待秒变量
-
-    #     p_data = {}
-
-    #     # 辅助结构：按“机器-天”归类所有可能的任务
-    #     machine_tasks = defaultdict(list)
-
-    #     # 等待秒上界（安全冗余）
-    #     max_wait_ub = (SEARCH_DAYS + 2) * 86400
-
-    #     # 1) 建模
-    #     for p_idx, p in enumerate(batch_patients):
-    #         p_data[p_idx] = p
-    #         possible_pres = []
-
-    #         earliest_date = max(p['reg_date'], self.global_start_date.date())
-    #         start_day_offset = (earliest_date - self.global_start_date.date()).days
-
-    #         exam_name = str(p['exam_type'])
-    #         is_heart = '心脏' in exam_name
-    #         is_angio = '造影' in exam_name
-    #         is_contrast = '增强' in exam_name
-
-    #         # ✅ 登记时间相对全局起点的“绝对秒”
-    #         reg_abs_sec = int(round((p['reg_datetime'] - self.global_start_date).total_seconds()))
-    #         reg_abs_sec = max(0, reg_abs_sec)
-
-    #         for d in range(SEARCH_DAYS):
-    #             current_day_offset = start_day_offset + d
-    #             current_date = self.global_start_date.date() + timedelta(days=current_day_offset)
-    #             day_start_sec, day_end_sec = self.get_work_window(current_date)
-    #             if day_end_sec <= 0:
-    #                 continue
-
-    #             weekday_iso = current_date.isoweekday()
-
-    #             # ✅ 同一天不得早于登记时刻（相对 WORK_START 的秒下界）
-    #             reg_time_lb = 0
-    #             if current_date == p['reg_datetime'].date():
-    #                 reg_t = p['reg_datetime'].time()
-    #                 reg_dt_day = datetime.combine(current_date, reg_t)
-    #                 work_dt_day = datetime.combine(current_date, WORK_START)
-    #                 reg_time_lb = int(round((reg_dt_day - work_dt_day).total_seconds()))
-    #                 reg_time_lb = max(0, reg_time_lb)
-
-    #             for m_id in range(MACHINE_COUNT):
-
-    #                 # --- 设备与规则过滤 ---
-    #                 if p['exam_type'] not in self.machine_exam_map[m_id]:
-    #                     continue
-    #                 if is_heart and (m_id != 3 or weekday_iso not in [2, 4]):
-    #                     continue
-    #                 if is_angio and (m_id != 1 or weekday_iso not in [1, 3, 5]):
-    #                     continue
-    #                 if is_contrast and weekday_iso in [6, 7]:
-    #                     continue
-
-    #                 # --- ✅ 不再在建模中加入 60s 换模间隙 ---
-    #                 occupied_until = self.machine_occupied_until[(m_id, current_date)]
-
-    #                 # 空间检查（仅基于占用与时长）
-    #                 if occupied_until + p['duration'] > day_end_sec:
-    #                     continue
-
-    #                 suffix = f"_p{p_idx}_m{m_id}_d{current_day_offset}"
-    #                 is_present = model.NewBoolVar(f"pres{suffix}")
-    #                 presences[(p_idx, m_id, current_day_offset)] = is_present
-
-    #                 # ✅ Start 下界 = max(已占用, 登记当天时刻下界)
-    #                 earliest_start_lb = max(occupied_until, reg_time_lb)
-
-    #                 start_var = model.NewIntVar(
-    #                     earliest_start_lb,
-    #                     day_end_sec - p['duration'],
-    #                     f"start{suffix}"
-    #                 )
-    #                 end_var = model.NewIntVar(
-    #                     earliest_start_lb + p['duration'],
-    #                     day_end_sec,
-    #                     f"end{suffix}"
-    #                 )
-
-    #                 interval_var = model.NewOptionalIntervalVar(
-    #                     start_var, p['duration'], end_var, is_present, f"interval{suffix}"
-    #                 )
-
-    #                 key = (p_idx, m_id, current_day_offset)
-    #                 intervals[key] = interval_var
-    #                 starts[key] = start_var
-    #                 ends[key] = end_var
-    #                 possible_pres.append(is_present)
-
-    #                 # ✅ 等待秒变量（线性化）
-    #                 wait_var = model.NewIntVar(0, max_wait_ub, f"wait{suffix}")
-    #                 waits[key] = wait_var
-
-    #                 scheduled_start_abs = current_day_offset * 86400 + start_var
-
-    #                 model.Add(wait_var == scheduled_start_abs - reg_abs_sec).OnlyEnforceIf(is_present)
-    #                 model.Add(wait_var == 0).OnlyEnforceIf(is_present.Not())
-
-    #                 # 收集任务（用于 NoOverlap & 目标中的换模计数代理）
-    #                 machine_tasks[(m_id, current_day_offset)].append({
-    #                     'p_idx': p_idx,
-    #                     'type': p['exam_type'],
-    #                     'start': start_var,
-    #                     'end': end_var,
-    #                     'pres': is_present
-    #                 })
-
-    #         if possible_pres:
-    #             model.Add(sum(possible_pres) == 1)
-
-    #     # 2) 约束
-    #     for (m_id, d_offset), task_list in machine_tasks.items():
-    #         # A. 不重叠
-    #         current_intervals = [
-    #             intervals[(t['p_idx'], m_id, d_offset)] for t in task_list
-    #         ]
-    #         model.AddNoOverlap(current_intervals)
-
-    #         # ✅ 取消批次内 60s 换模硬约束
-    #         # self._add_intra_batch_gap_constraints(model, task_list)
-
-    #     # 3) 目标
-    #     # ✅ 等待时间（秒级）
-    #     obj_terms = []
-    #     for key, wait_var in waits.items():
-    #         p_idx, _, _ = key
-    #         p = p_data[p_idx]
-    #         w = WAIT_WEIGHT_SELF if p['is_self_selected'] else WAIT_WEIGHT_NON
-    #         obj_terms.append(wait_var * w)
-
-    #     # ✅ 换模个数代理：每台机器每天使用的“检查类型数 - 1”
-    #     switch_proxy_vars = []
-    #     for (m_id, d_offset), task_list in machine_tasks.items():
-    #         if not task_list:
-    #             continue
-
-    #         # 当天是否有任何任务被选中
-    #         all_pres = [t['pres'] for t in task_list]
-    #         any_present = model.NewBoolVar(f"any_m{m_id}_d{d_offset}")
-    #         model.AddMaxEquality(any_present, all_pres)
-
-    #         # 统计该机该日被使用的“类型数”
-    #         type_to_pres = defaultdict(list)
-    #         for t in task_list:
-    #             type_to_pres[str(t['type'])].append(t['pres'])
-
-    #         used_bools = []
-    #         for idx, (_tname, pres_list) in enumerate(type_to_pres.items()):
-    #             used = model.NewBoolVar(f"used_m{m_id}_d{d_offset}_{idx}")
-    #             if len(pres_list) == 1:
-    #                 model.Add(used == pres_list[0])
-    #             else:
-    #                 model.AddMaxEquality(used, pres_list)
-    #             used_bools.append(used)
-
-    #         tcount = len(used_bools)
-    #         type_used_count = model.NewIntVar(0, tcount, f"type_cnt_m{m_id}_d{d_offset}")
-    #         model.Add(type_used_count == sum(used_bools))
-
-    #         # 换模个数代理 = max(0, type_used_count - 1)
-    #         switch_proxy = model.NewIntVar(0, max(0, tcount - 1), f"sw_m{m_id}_d{d_offset}")
-    #         # 若当天有排程：sw = types - 1
-    #         model.Add(switch_proxy == type_used_count - 1).OnlyEnforceIf(any_present)
-    #         # 若当天无排程：sw = 0
-    #         model.Add(switch_proxy == 0).OnlyEnforceIf(any_present.Not())
-
-    #         switch_proxy_vars.append(switch_proxy)
-
-    #     if switch_proxy_vars:
-    #         obj_terms.append(sum(switch_proxy_vars) * TRANSITION_PENALTY)
-
-    #     if obj_terms:
-    #         model.Minimize(sum(obj_terms))
-
-    #     # 4) 求解
-    #     solver = cp_model.CpSolver()
-    #     solver.parameters.num_search_workers = num_workers
-    #     solver.parameters.max_time_in_seconds = SOLVER_TIME_LIMIT
-    #     solver.parameters.log_search_progress = False
-
-    #     status = solver.Solve(model)
-
-    #     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-    #         print(f"  -> 求解成功 ({solver.StatusName(status)})")
-
-    #         batch_results_per_machine_day = defaultdict(list)
-
-    #         for key, is_present in presences.items():
-    #             if solver.Value(is_present):
-    #                 p_idx, m_id, day_offset = key
-    #                 start_val = solver.Value(starts[key])
-    #                 end_val = solver.Value(ends[key])
-    #                 p = p_data[p_idx]
-
-    #                 real_date = self.global_start_date.date() + timedelta(days=day_offset)
-
-    #                 record = {
-    #                     'patient_id': p['id'],
-    #                     'exam_type': p['exam_type'],
-    #                     'reg_date': p['reg_date'],
-    #                     'reg_datetime': p['reg_datetime'],
-    #                     'is_self_selected': p['is_self_selected'],
-    #                     'machine_id': m_id + 1,
-    #                     'date': real_date,
-    #                     'start_time': (datetime.combine(real_date, WORK_START) + timedelta(seconds=start_val)).time(),
-    #                     'end_time': (datetime.combine(real_date, WORK_START) + timedelta(seconds=end_val)).time(),
-    #                     'wait_days': (real_date - p['reg_date']).days
-    #                 }
-    #                 self.final_schedule.append(record)
-    #                 batch_results_per_machine_day[(m_id, real_date)].append((end_val, p['exam_type']))
-
-    #         # 批次间状态更新（保持不变）
-    #         for (m_id, d_date), results in batch_results_per_machine_day.items():
-    #             max_end_time, last_exam_type = max(results, key=lambda x: x[0])
-
-    #             self.machine_occupied_until[(m_id, d_date)] = max(
-    #                 self.machine_occupied_until[(m_id, d_date)],
-    #                 max_end_time
-    #             )
-    #             self.machine_last_exam_type[(m_id, d_date)] = last_exam_type
-
-    #     else:
-    #         print("  -> 求解失败，无可行解")
-
-    def _add_intra_batch_gap_constraints(self, model, task_list):
-        """
-        批次内部换模硬约束：
-        若类型不同，则两任务之间间隔必须 >= 60 秒。
-        """
-        n = len(task_list)
-        for i in range(n):
-            for j in range(i + 1, n):
-                task_a = task_list[i]
-                task_b = task_list[j]
-
-                if task_a['type'] != task_b['type']:
-                    is_a_before_b = model.NewBoolVar(
-                        f"order_{task_a['p_idx']}_{task_b['p_idx']}"
-                    )
-
-                    model.Add(task_b['start'] >= task_a['end'] + 60).OnlyEnforceIf(
-                        [task_a['pres'], task_b['pres'], is_a_before_b]
-                    )
-
-                    model.Add(task_a['start'] >= task_b['end'] + 60).OnlyEnforceIf(
-                        [task_a['pres'], task_b['pres'], is_a_before_b.Not()]
-                    )
-
-    # ===================== 评分函数（用于你的对齐/分析） =====================
-    def evaluate_schedule_score(self):
-        if not self.final_schedule:
-            return 0, {}
-
-        print("\n" + "=" * 50)
-        print("🔎 正在进行规则评分验证...")
-        print("=" * 50)
-
-        total_score = 0
-        details = defaultdict(int)
-
-        sorted_sched = sorted(
-            self.final_schedule,
-            key=lambda x: (x['machine_id'], x['date'], x['start_time'])
-        )
-
-        prev_machine = -1
-        prev_exam_type = None
-        prev_date = None
-        prev_end_time = None
-
-        for item in sorted_sched:
-            # 1) 等待惩罚（仍保留“天级”评分口径）
-            wait_days = (item['date'] - item['reg_date']).days
-            if wait_days < 0:
-                total_score -= LOGICAL_PENALTY
-                details['logical_violation'] += 1
-                wait_cost = 0
-            else:
-                weight = SELF_SELECTED_PENALTY if item['is_self_selected'] else NON_SELF_PENALTY
-                wait_cost = wait_days * weight
-
-            total_score -= wait_cost
-            details['wait_cost'] += wait_cost
-
-            # 2) 换模惩罚 & 间隙验证
-            current_start_dt = datetime.combine(item['date'], item['start_time'])
-
-            if (item['machine_id'] == prev_machine and item['date'] == prev_date):
-                if item['exam_type'] != prev_exam_type:
-                    total_score -= TRANSITION_PENALTY
-                    details['transition_cost'] += TRANSITION_PENALTY
-                    details['transition_count'] += 1
-
-                    if prev_end_time:
-                        gap = (current_start_dt - prev_end_time).total_seconds()
-                        if gap < 60:
-                            print(
-                                f"❌ 严重错误: 发现换模间隙不足! "
-                                f"{prev_end_time.time()} -> {item['start_time']} (Gap={gap}s)"
-                            )
-                            details['gap_violation'] += 1
-
-            prev_machine = item['machine_id']
-            prev_exam_type = item['exam_type']
-            prev_date = item['date']
-            prev_end_time = datetime.combine(item['date'], item['end_time'])
-
-            # 3) 设备/规则惩罚
-            weekday = item['date'].isoweekday()
-            m_idx = item['machine_id'] - 1
-            exam_name = str(item['exam_type'])
-            is_heart = '心脏' in exam_name
-            is_angio = '造影' in exam_name
-            is_contrast = '增强' in exam_name
-
-            rule_violated = False
-            if is_heart and not ((weekday in [2, 4]) and m_idx == 3):
-                rule_violated = True
-            if is_angio and not ((weekday in [1, 3, 5]) and m_idx == 1):
-                rule_violated = True
-            if is_contrast and weekday in [6, 7]:
-                rule_violated = True
-
-            if rule_violated:
-                total_score -= DEVICE_PENALTY
-                details['device_violation'] += 1
-
-        print(f"📊 最终 Fitness 得分: {total_score:,.0f}")
-        print(f"  ❌ 总扣分: {-total_score:,.0f}")
-        print(f"  ⏳ 等待时间惩罚(天级报告口径): {details['wait_cost']:,.0f}")
-        print(f"  🔄 换模惩罚: {details['transition_cost']:,.0f} (发生 {details['transition_count']} 次)")
-        print(f"  ⚡ 间隙违规(Gap < 60s): {details['gap_violation']} 次")
-        print(f"  🔧 设备/规则违规: {details['device_violation']} 次")
-
-        return total_score, details
-
-    def export_excel(self, filename, score_data=None):
-        if not self.final_schedule:
-            return
-
-        df = pd.DataFrame(self.final_schedule)
-
-        cols = [
-            'patient_id', 'exam_type', 'reg_date', 'reg_datetime',
-            'is_self_selected', 'machine_id', 'date',
-            'start_time', 'end_time', 'wait_days'
-        ]
-        df = df[cols].sort_values(by=['date', 'machine_id', 'start_time'])
+                is_self = False
+
+        cid = (raw_id, reg_dt.strftime('%Y%m%d'))
+
+        patients.append({
+            'id': raw_id,
+            'cid': cid,
+            'exam_type': exam,
+            'exam_raw': str(exam_raw),
+            'duration': duration_sec,
+            'reg_datetime': reg_dt.to_pydatetime(),
+            'reg_date': reg_dt.date(),
+            'is_self_selected': is_self,
+        })
+
+    print(f"✅ 患者导入完成，总人数: {len(patients)}")
+    return patients
+
+def import_device_constraints(device_file):
+    print(f"正在读取设备限制数据: {device_file}")
+    df = safe_read_excel(device_file)
+
+    machine_col = None
+    exam_col = None
+    for c in df.columns:
+        cs = str(c).strip()
+        if cs in ['机器', '机器ID', '设备', 'machine', 'machine_id']:
+            machine_col = c
+        if cs in ['检查项目', '项目', 'exam', 'exam_type']:
+            exam_col = c
+
+    if machine_col is None or exam_col is None:
+        machine_col = df.columns[0]
+        exam_col = df.columns[1]
+
+    machine_exam_map: Dict[int, Set[str]] = defaultdict(set)
+
+    for _, row in df.iterrows():
+        mid_raw = row[machine_col]
+        exam_raw = row[exam_col]
+        if pd.isna(mid_raw) or pd.isna(exam_raw):
+            continue
 
         try:
-            with pd.ExcelWriter(filename) as writer:
-                df.to_excel(writer, sheet_name='详细排程', index=False)
-                df.groupby('date').size().reset_index(name='每日检查量').to_excel(
-                    writer, sheet_name='统计', index=False
-                )
-                if score_data:
-                    score, details = score_data
-                    pd.DataFrame(
-                        [['Total Score', score]] + [[k, v] for k, v in details.items()],
-                        columns=['Metric', 'Value']
-                    ).to_excel(writer, sheet_name='评分报告', index=False)
-            print(f"排程已成功导出至: {filename}")
-        except Exception as e:
-            print(f"导出 Excel 失败: {e}")
+            mid = int(mid_raw) - 1
+        except Exception:
+            try:
+                mid = int(mid_raw)
+            except Exception:
+                continue
+
+        if mid < 0 or mid >= MACHINE_COUNT:
+            continue
+
+        machine_exam_map[mid].add(clean_exam_name(exam_raw))
+
+    print("✅ 设备限制导入完成。")
+    return machine_exam_map
 
 
-# ===================== 主程序 =====================
+# ===================== 业务规则 =====================
+
+def daily_work_seconds(date_obj):
+    weekday = date_obj.isoweekday()
+    hours_avail = 15.0 - WEEKDAY_END_HOURS.get(weekday, 0)
+    return int(round(hours_avail * 3600))
+
+def is_device_feasible(p, machine_id: int, machine_exam_map):
+    allowed = machine_exam_map.get(machine_id, set())
+    return (p['exam_type'] in allowed) if allowed else False
+
+def is_rule_feasible(p, machine_id: int, date_obj):
+    exam_name = p.get('exam_raw', '') or p.get('exam_type', '')
+
+    is_heart = ('心脏' in str(exam_name))
+    if is_heart:
+        if machine_id != 3:
+            return False
+        if date_obj.isoweekday() not in (2, 4):
+            return False
+
+    is_angio = ('造影' in str(exam_name))
+    if is_angio:
+        if machine_id != 1:
+            return False
+        if date_obj.isoweekday() not in (1, 3, 5):
+            return False
+
+    is_contrast = ('增强' in str(exam_name))
+    if is_contrast:
+        if date_obj.isoweekday() in (6, 7):
+            return False
+
+    return True
+
+
+# ===================== 列结构与成本 =====================
+
+@dataclass
+class Column:
+    col_id: int
+    machine_id: int
+    date: datetime.date
+    patients_idx: List[int]
+    cost: int
+    transition_count: int
+
+def compute_column_cost(patients: List[dict], col_patients_idx: List[int], date_obj):
+    if not col_patients_idx:
+        return 0, 0
+
+    sorted_idx = sorted(col_patients_idx, key=lambda i: patients[i]['reg_datetime'])
+
+    wait_cost = 0
+    transition_cnt = 0
+    prev_type = None
+
+    for i in sorted_idx:
+        p = patients[i]
+        wait_days = (date_obj - p['reg_date']).days
+
+        if p.get('is_self_selected', False):
+            wait_cost += max(0, wait_days) * SELF_SELECTED_PENALTY
+        else:
+            wait_cost += max(0, wait_days) * NON_SELF_PENALTY
+
+        cur_type = p['exam_type']
+        if prev_type is not None and cur_type != prev_type:
+            transition_cnt += 1
+        prev_type = cur_type
+
+    total_cost = wait_cost + transition_cnt * TRANSITION_PENALTY
+    return int(total_cost), int(transition_cnt)
+
+
+# ===================== Pattern 构造核心 =====================
+
+def _try_pack_pattern(
+    patients: List[dict],
+    candidate_idxs: List[int],
+    date_obj,
+    cap_sec: int,
+    strategy: str = "wait_first",
+):
+    """
+    生成一个 machine-day 的可行 pattern（患者子序列）
+    strategy:
+      - wait_first: 等待天数/紧急度优先（按登记时间早者优先）
+      - type_cluster: 同类型聚类优先（减换模）
+      - random_mix: 随机扰动 + 贪心
+    """
+    if not candidate_idxs:
+        return []
+
+    # 计算一个简单“紧急度”排序键
+    def wait_key(i):
+        p = patients[i]
+        # 登记越早，等待越大
+        return p['reg_datetime']
+
+    if strategy == "wait_first":
+        ordered = sorted(candidate_idxs, key=wait_key)
+    elif strategy == "type_cluster":
+        # 类型优先，其次登记时间
+        ordered = sorted(candidate_idxs, key=lambda i: (patients[i]['exam_type'], patients[i]['reg_datetime']))
+    elif strategy == "random_mix":
+        ordered = candidate_idxs[:]
+        random.shuffle(ordered)
+        # 让随机序列再轻度按登记时间稳定一下
+        # 避免完全无意义的乱序
+        ordered = sorted(ordered, key=lambda i: (random.randint(0, 3), patients[i]['reg_datetime']))
+    else:
+        ordered = sorted(candidate_idxs, key=wait_key)
+
+    packed = []
+    used = 0
+    prev_type = None
+
+    for i in ordered:
+        dur = int(patients[i]['duration'])
+        add_gap = 0
+        cur_type = patients[i]['exam_type']
+        if prev_type is not None and cur_type != prev_type:
+            add_gap = SWITCH_GAP_SEC
+
+        if used + dur + add_gap <= cap_sec:
+            packed.append(i)
+            used += dur + add_gap
+            prev_type = cur_type
+
+    return packed
+
+
+# ===================== 初始化：按 machine-day 生成 pattern 列 =====================
+
+def build_initial_columns_patterns(
+    patients: List[dict],
+    machine_exam_map,
+    start_date: datetime,
+    search_days: int,
+    patterns_per_md: int = INIT_PATTERNS_PER_MD,
+):
+    """
+    真正符合 CG 语义的初始化：
+      对每个 (machine, day) 生成若干种风格的可行 pattern 列
+    """
+    columns: List[Column] = []
+    col_id = 0
+
+    # 预排序患者索引（供候选筛选）
+    all_idx = list(range(len(patients)))
+    all_idx.sort(key=lambda i: patients[i]['reg_datetime'])
+
+    strategies = ["wait_first", "type_cluster", "random_mix"]
+
+    for d_off in range(search_days):
+        date_obj = start_date.date() + timedelta(days=d_off)
+        cap = daily_work_seconds(date_obj)
+        if cap <= 0:
+            continue
+
+        for m in range(MACHINE_COUNT):
+            # 找可行候选
+            cand = []
+            for i in all_idx:
+                p = patients[i]
+                if (date_obj - p['reg_date']).days < 0:
+                    continue
+                if p['duration'] > cap:
+                    continue
+                if not is_device_feasible(p, m, machine_exam_map):
+                    continue
+                if not is_rule_feasible(p, m, date_obj):
+                    continue
+                cand.append(i)
+
+            if not cand:
+                continue
+
+            # 生成多风格 pattern
+            used_strats = strategies[:patterns_per_md]
+            for st in used_strats:
+                packed = _try_pack_pattern(patients, cand, date_obj, cap, strategy=st)
+                if not packed:
+                    continue
+
+                cost, tcnt = compute_column_cost(patients, packed, date_obj)
+                columns.append(Column(col_id, m, date_obj, packed, cost, tcnt))
+                col_id += 1
+
+    return columns, col_id
+
+
+# ===================== RMP LP: Set Partitioning + Slack =====================
+
+def solve_rmp_lp(patients: List[dict], columns: List[Column]):
+    """
+    LP Relaxation Master:
+      min Σ cost_c x_c + Σ bigM * slack_i
+    s.t.
+      Σ_{c covering i} x_c + slack_i == 1
+      Σ_{c in (m,d)} x_c <= 1   (pattern语义)
+    """
+    solver = pywraplp.Solver.CreateSolver("GLOP")
+    if solver is None:
+        raise RuntimeError("无法创建 GLOP 求解器。")
+
+    n_pat = len(patients)
+    n_col = len(columns)
+
+    x = [solver.NumVar(0.0, 1.0, f"x_{c.col_id}") for c in columns]
+    slack = [solver.NumVar(0.0, 1.0, f"slack_{i}") for i in range(n_pat)]
+
+    # 1) 覆盖约束
+    cols_by_patient = [[] for _ in range(n_pat)]
+    for idx_c, col in enumerate(columns):
+        for i in col.patients_idx:
+            cols_by_patient[i].append(idx_c)
+
+    patient_cons = []
+    for i in range(n_pat):
+        ct = solver.Constraint(1.0, 1.0, f"cover_{i}")
+        for idx_c in cols_by_patient[i]:
+            ct.SetCoefficient(x[idx_c], 1.0)
+        ct.SetCoefficient(slack[i], 1.0)
+        patient_cons.append(ct)
+
+    # 2) machine-day 只能选 1 个 pattern
+    cols_by_md = defaultdict(list)
+    for idx_c, col in enumerate(columns):
+        cols_by_md[(col.machine_id, col.date)].append(idx_c)
+
+    md_cons = {}
+    for (m, d), idx_list in cols_by_md.items():
+        ct = solver.Constraint(0.0, 1.0, f"md_{m}_{d}")
+        for idx_c in idx_list:
+            ct.SetCoefficient(x[idx_c], 1.0)
+        md_cons[(m, d)] = ct
+
+    # 目标
+    obj = solver.Objective()
+    for idx_c, col in enumerate(columns):
+        obj.SetCoefficient(x[idx_c], float(col.cost))
+    for i in range(n_pat):
+        obj.SetCoefficient(slack[i], float(UNSCHEDULED_PENALTY))
+    obj.SetMinimization()
+
+    status = solver.Solve()
+    if status != pywraplp.Solver.OPTIMAL:
+        print(f"⚠️ RMP LP 未达到最优，status={status}")
+
+    return solver, x, slack, patient_cons, md_cons
+
+
+# ===================== RMP MIP =====================
+
+def solve_rmp_mip(patients: List[dict], columns: List[Column]):
+    """
+    Integer Master:
+      同机同日选 1 个 pattern
+      患者覆盖等式 + slack
+    """
+    solver = pywraplp.Solver.CreateSolver("CBC")
+    if solver is None:
+        raise RuntimeError("无法创建 CBC 求解器。")
+
+    n_pat = len(patients)
+    n_col = len(columns)
+
+    x = [solver.BoolVar(f"x_{c.col_id}") for c in columns]
+    slack = [solver.BoolVar(f"slack_{i}") for i in range(n_pat)]
+
+    # 覆盖
+    cols_by_patient = [[] for _ in range(n_pat)]
+    for idx_c, col in enumerate(columns):
+        for i in col.patients_idx:
+            cols_by_patient[i].append(idx_c)
+
+    for i in range(n_pat):
+        ct = solver.Constraint(1.0, 1.0, f"cover_{i}")
+        for idx_c in cols_by_patient[i]:
+            ct.SetCoefficient(x[idx_c], 1.0)
+        ct.SetCoefficient(slack[i], 1.0)
+
+    # machine-day 选 1 个 pattern
+    cols_by_md = defaultdict(list)
+    for idx_c, col in enumerate(columns):
+        cols_by_md[(col.machine_id, col.date)].append(idx_c)
+
+    for (m, d), idx_list in cols_by_md.items():
+        ct = solver.Constraint(0.0, 1.0, f"md_{m}_{d}")
+        for idx_c in idx_list:
+            ct.SetCoefficient(x[idx_c], 1.0)
+
+    # 目标
+    obj = solver.Objective()
+    for idx_c, col in enumerate(columns):
+        obj.SetCoefficient(x[idx_c], float(col.cost))
+    for i in range(n_pat):
+        obj.SetCoefficient(slack[i], float(UNSCHEDULED_PENALTY))
+    obj.SetMinimization()
+
+    print("开始求解最终整数规划...")
+    solver.SetTimeLimit(6000000000000)
+    status = solver.Solve()
+
+    chosen_cols = []
+    unscheduled_count = 0
+
+    if status in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
+        for idx_c, col in enumerate(columns):
+            if x[idx_c].solution_value() > 0.5:
+                chosen_cols.append(col)
+        for i in range(n_pat):
+            if slack[i].solution_value() > 0.5:
+                unscheduled_count += 1
+    else:
+        print(f"⚠️ MIP 未找到可行解，status={status}")
+
+    print(f"MIP 求解完成。放弃治疗的患者数: {unscheduled_count}")
+    print(f"最终选中列数: {len(chosen_cols)}")
+    return chosen_cols, unscheduled_count
+
+
+# ===================== Pricing：为 machine-day 生成新 pattern =====================
+
+def heuristic_pricing(
+    patients: List[dict],
+    machine_exam_map,
+    start_date: datetime,
+    search_days: int,
+    dual_p: List[float],
+    next_col_id: int,
+    max_new_cols: int = MAX_NEW_COLS_PER_ITER,
+    candidate_patients_topk: int = CANDIDATE_PATIENTS_TOPK,
+):
+    """
+    启发式 pricing:
+      - 选对偶值高的患者作为候选核心
+      - 对每个 machine-day 生成多风格可行 pattern
+      - reduced cost = cost - sum(dual_p[i]) （pattern master 的典型形式）
+    """
+    n_pat = len(patients)
+    ranked = sorted(range(n_pat), key=lambda i: dual_p[i], reverse=True)
+    ranked = ranked[:min(candidate_patients_topk, n_pat)]
+
+    new_cols = []
+    col_id = next_col_id
+
+    strategies = ["wait_first", "type_cluster", "random_mix"]
+
+    for d_off in range(search_days):
+        date_obj = start_date.date() + timedelta(days=d_off)
+        cap = daily_work_seconds(date_obj)
+        if cap <= 0:
+            continue
+
+        for m in range(MACHINE_COUNT):
+            # 过滤该机该日可行候选（基于高对偶患者集合）
+            cand = []
+            for i in ranked:
+                p = patients[i]
+                if (date_obj - p['reg_date']).days < 0:
+                    continue
+                if p['duration'] > cap:
+                    continue
+                if not is_device_feasible(p, m, machine_exam_map):
+                    continue
+                if not is_rule_feasible(p, m, date_obj):
+                    continue
+                cand.append(i)
+
+            if not cand:
+                continue
+
+            # 为该 machine-day 生成多风格 pattern
+            for st in strategies:
+                packed = _try_pack_pattern(patients, cand, date_obj, cap, strategy=st)
+                if len(packed) == 0:
+                    continue
+
+                cost, tcnt = compute_column_cost(patients, packed, date_obj)
+                dual_sum = sum(dual_p[i] for i in packed)
+                reduced = cost - dual_sum
+
+                # 只引入负 reduced cost 的列
+                if reduced < -1e-6:
+                    new_cols.append(Column(col_id, m, date_obj, packed, cost, tcnt))
+                    col_id += 1
+
+                    if len(new_cols) >= max_new_cols:
+                        return new_cols, col_id
+
+    return new_cols, col_id
+
+
+# ===================== 导出排程 =====================
+
+def build_final_schedule_from_columns(patients: List[dict], chosen_cols: List[Column]):
+    """
+    Route A 语义下导出是自然正确的：
+      同机同日最多 1 列，所以每列从 07:00 排一次不会冲突
+    """
+    final = []
+
+    for col in chosen_cols:
+        date_obj = col.date
+        m_id = col.machine_id
+
+        idxs = sorted(col.patients_idx, key=lambda i: patients[i]['reg_datetime'])
+
+        cur_sec = 0
+        prev_type = None
+
+        for i in idxs:
+            p = patients[i]
+
+            if prev_type is not None and p['exam_type'] != prev_type:
+                cur_sec += SWITCH_GAP_SEC
+
+            start_dt = datetime.combine(date_obj, WORK_START) + timedelta(seconds=cur_sec)
+            cur_sec += p['duration']
+            end_dt = datetime.combine(date_obj, WORK_START) + timedelta(seconds=cur_sec)
+
+            wait_days = (date_obj - p['reg_date']).days
+
+            final.append({
+                'patient_id': p['id'],
+                'exam_type': p['exam_type'],
+                'reg_date': p['reg_date'],
+                'is_self_selected': p.get('is_self_selected', False),
+                'machine_id': m_id + 1,
+                'date': date_obj,
+                'start_time': start_dt.time(),
+                'end_time': end_dt.time(),
+                'wait_days': wait_days
+            })
+
+            prev_type = p['exam_type']
+
+        # 可选：容量检查
+        cap = daily_work_seconds(date_obj)
+        if cur_sec > cap:
+            print(f"⚠️ 警告：机器{m_id+1} {date_obj} "
+                  f"导出序列用时 {cur_sec}s 超过容量 {cap}s "
+                  f"(pattern 构造策略可再收紧)")
+
+    final.sort(key=lambda x: (x['date'], x['machine_id'], x['start_time']))
+    return final
+
+
+def evaluate_score(final_schedule: List[dict]):
+    if not final_schedule:
+        return 0, {}
+
+    total_score = 0
+    details = defaultdict(int)
+
+    prev_machine = None
+    prev_exam_type = None
+    prev_date = None
+
+    for item in final_schedule:
+        wait_days = (item['date'] - item['reg_date']).days
+        if item.get('is_self_selected', False):
+            wait_cost = max(0, wait_days) * SELF_SELECTED_PENALTY
+        else:
+            wait_cost = max(0, wait_days) * NON_SELF_PENALTY
+
+        total_score += wait_cost
+        details['等待成本'] += wait_cost
+
+        if prev_machine == item['machine_id'] and prev_date == item['date']:
+            if prev_exam_type is not None and item['exam_type'] != prev_exam_type:
+                total_score += TRANSITION_PENALTY
+                details['换模成本'] += TRANSITION_PENALTY
+
+        prev_machine = item['machine_id']
+        prev_exam_type = item['exam_type']
+        prev_date = item['date']
+
+    details['总评分'] = total_score
+    return total_score, dict(details)
+
+
+def export_excel(final_schedule: List[dict], filename: str, score_data=None):
+    if not final_schedule:
+        print("无数据导出。")
+        return
+
+    df = pd.DataFrame(final_schedule)
+    cols = [
+        'patient_id', 'exam_type', 'reg_date', 'is_self_selected',
+        'machine_id', 'date', 'start_time', 'end_time', 'wait_days'
+    ]
+    for c in cols:
+        if c not in df.columns:
+            df[c] = ''
+    df = df[cols]
+
+    with pd.ExcelWriter(filename) as writer:
+        df.to_excel(writer, sheet_name='详细排程', index=False)
+
+        stats = df.groupby(['date', 'machine_id']).size().reset_index(name='当日该机检查量')
+        stats.to_excel(writer, sheet_name='机日统计', index=False)
+
+        if score_data:
+            score, details = score_data
+            score_items = [['Total Score', score]] + [[k, v] for k, v in details.items()]
+            pd.DataFrame(score_items, columns=['Metric', 'Value']).to_excel(
+                writer, sheet_name='评分报告', index=False
+            )
+
+    print(f"✅ 排程文件已生成: {filename}")
+
+
+# ===================== 列生成主流程 =====================
+
+def column_generation_solve(
+    patients: List[dict],
+    machine_exam_map,
+    start_date: datetime,
+    search_days: int = SEARCH_DAYS,
+    max_iters: int = MAX_ITERS,
+    max_new_cols_per_iter: int = MAX_NEW_COLS_PER_ITER
+):
+    print(">>> 启动列生成算法 (Column Generation) - Route A <<<")
+
+    # 1) 初始化 pattern 列
+    columns, next_col_id = build_initial_columns_patterns(
+        patients, machine_exam_map, start_date, search_days, patterns_per_md=INIT_PATTERNS_PER_MD
+    )
+    print(f"初始列数: {len(columns)}")
+
+    # 2) CG Loop
+    for it in range(1, max_iters + 1):
+        print(f"\n--- Iteration {it}/{max_iters} ---")
+
+        solver_lp, x, slack, patient_cons, md_cons = solve_rmp_lp(patients, columns)
+
+        dual_p = [ct.dual_value() for ct in patient_cons]
+
+        new_cols, next_col_id = heuristic_pricing(
+            patients,
+            machine_exam_map,
+            start_date,
+            search_days,
+            dual_p,
+            next_col_id,
+            max_new_cols=max_new_cols_per_iter,
+            candidate_patients_topk=CANDIDATE_PATIENTS_TOPK
+        )
+
+        if not new_cols:
+            print("本轮未找到有效新列，提前终止 CG。")
+            break
+
+        columns.extend(new_cols)
+        print(f"本轮新增有效列: {len(new_cols)}，当前总列池: {len(columns)}")
+
+    # 3) 最终整数求解
+    print("\n>>> 进入整数规划阶段 (Integer RMP) <<<")
+    chosen_cols, unscheduled_count = solve_rmp_mip(patients, columns)
+
+    return chosen_cols, unscheduled_count
+
+
+# ===================== main =====================
 
 def main():
     current_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # 你原来的默认文件名（如需改名，直接改这里）
+    # === 修改为你的真实路径 ===
     patient_file = os.path.join(current_dir, '实验数据6.1small - 副本.xlsx')
     duration_file = os.path.join(current_dir, '程序使用实际平均耗时3 - 副本.xlsx')
     device_constraint_file = os.path.join(current_dir, '设备限制4.xlsx')
 
-    for f in [patient_file, duration_file, device_constraint_file]:
-        if not os.path.exists(f):
-            print(f"❌ 错误：找不到文件 {f}")
-            return
+    missing_files = [f for f in [patient_file, duration_file, device_constraint_file] if not os.path.exists(f)]
+    if missing_files:
+        print(f"❌ 错误：找不到以下数据文件，请确认路径:\n{missing_files}")
+        return
 
+    # 1) 导入
     patients = import_data(patient_file, duration_file)
-    machine_map = import_device_constraints(device_constraint_file)
+    machine_exam_map = import_device_constraints(device_constraint_file)
 
-    scheduler = RollingHorizonScheduler(patients, machine_map, START_DATE)
-    scheduler.solve()
+    # 2) 运行 Route A 列生成
+    chosen_cols, unscheduled_count = column_generation_solve(
+        patients,
+        machine_exam_map,
+        start_date=START_DATE,
+        search_days=SEARCH_DAYS,
+        max_iters=MAX_ITERS,
+        max_new_cols_per_iter=MAX_NEW_COLS_PER_ITER
+    )
 
-    score, details = scheduler.evaluate_schedule_score()
+    # 3) 导出排程
+    final_schedule = build_final_schedule_from_columns(patients, chosen_cols)
+    score, details = evaluate_score(final_schedule)
 
-    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-    out_file = os.path.join(current_dir, f'schedule_countblock_waitsec_{ts}.xlsx')
-    scheduler.export_excel(out_file, score_data=(score, details))
+    print("\n" + "=" * 50)
+    print("📊 最终结果统计 (Route A)")
+    print("=" * 50)
+    print(f"总评分 (负分制): -{int(score):,}")
+    print(f"等待成本: {int(details.get('等待成本', 0)):,}")
+    print(f"换模成本: {int(details.get('换模成本', 0)):,}")
+    print(f"未排程人数(基于MIP slack): {unscheduled_count} 人")
+
+    out_file = os.path.join(current_dir, 'column_generation_schedule_routeA.xlsx')
+    export_excel(final_schedule, out_file, score_data=(score, details))
 
 
 if __name__ == "__main__":
-    multiprocessing.freeze_support()
     main()
