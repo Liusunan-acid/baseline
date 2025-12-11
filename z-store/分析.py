@@ -241,9 +241,13 @@
 
 
 # if __name__ == "__main__":
-#     schedule_file = '/home/preprocess/_funsearch/baseline/排程_第4700代.xlsx'
+#     schedule_file = '/home/preprocess/_funsearch/baseline/schedule_seconds_fifo_20251211_213515.xlsx'
 #     limit_file = '/home/preprocess/_funsearch/baseline/设备限制4.xlsx'
 #     analyze_medical_data(schedule_file, limit_file)
+
+
+
+
 
 import pandas as pd
 import os
@@ -491,6 +495,6 @@ def analyze_medical_data(schedule_path, limit_path):
 
 
 if __name__ == "__main__":
-    schedule_file = "/home/preprocess/_funsearch/baseline/output_schedules/ALNS_schedule_20251209_220325_fit_-126663200.xlsx"
+    schedule_file = "/home/preprocess/_funsearch/baseline/output_schedules/final_schedule_RUN2_20251211_222119_fit_-108529600.xlsx"
     limit_file = '/home/preprocess/_funsearch/baseline/设备限制4.xlsx'
     analyze_medical_data(schedule_file, limit_file)

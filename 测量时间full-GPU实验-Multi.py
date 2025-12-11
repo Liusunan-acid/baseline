@@ -22,7 +22,6 @@
 # START_DATE = datetime(2025, 1, 1, 7, 0)
 # MACHINE_COUNT = 6
 # DEVICE_PENALTY = 500000
-# # POPULATION_FILE = 'population_state.json' # 状态保存/加载在此版本中被移除
 
 # DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # if torch.cuda.is_available():
@@ -1097,7 +1096,6 @@
 #         print(f"运行时错误: {e}")
 #         traceback.print_exc()
 #     finally:
-#         # 移除 input() 以便自动退出
 #         pass
 
 
@@ -1992,7 +1990,7 @@ class MultiRunOptimizer:
         
         X = self._mutate_step1_violations(X, parent_violate_mask)
         X = self._mutate_step2_base_swap(X, current_gen, base_swap_prob)
-        X = self._mutate_step3_greedy_cluster(X, greedy_prob)
+        #X = self._mutate_step3_greedy_cluster(X, greedy_prob)
         
         return X
 
