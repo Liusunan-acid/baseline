@@ -495,6 +495,6 @@ def analyze_medical_data(schedule_path, limit_path):
 
 
 if __name__ == "__main__":
-    schedule_file = "/home/preprocess/_funsearch/baseline/output_schedules/final_schedule_RUN2_20251211_222119_fit_-108529600.xlsx"
+    schedule_file = "/home/preprocess/_funsearch/baseline/PSO_results/PSO_best_run_0.xlsx"
     limit_file = '/home/preprocess/_funsearch/baseline/设备限制4.xlsx'
     analyze_medical_data(schedule_file, limit_file)

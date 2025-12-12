@@ -636,9 +636,29 @@ class ACOScheduler(GPUEngineMixin):
             
             # 向量化加法
             self._tau[from_nodes, to_nodes] += delta_tau
+
             
             # 4.3 限制范围 (MMAS Strategy: Min-Max Limits)
-            # 防止信息素过大导致收敛过早，或过小导致搜索停滞
+            # ====== Top-20 递减加分：Top-1 的加分强度 = 原来的 q/N（不归一化） ======
+            # k = min(20, self.num_ants)
+            # top_vals, top_idx = torch.topk(fitness, k=k, largest=True, sorted=True)  # fitness: [A]
+            # top_paths = perms_idx[top_idx]  # [k, N]
+
+            # # 原来的最优路径每条边加分（保持完全一致）
+            # delta_base = self.q / float(N)
+
+            # # 递减权重：第1名=1，第k名=1/k（线性递减）
+            # # rank=0..k-1 -> weight = (k-rank)/k -> [1, (k-1)/k, ..., 1/k]
+            # ranks = torch.arange(k, device=DEVICE, dtype=DTYPE_FLOAT)  # 0..k-1
+            # weights = (k - ranks) / float(k)                           # [k]
+
+            # from_nodes = top_paths[:, :-1].reshape(-1)                         # [k*(N-1)]
+            # to_nodes   = top_paths[:, 1:].reshape(-1)                          # [k*(N-1)]
+            # delta_flat = (delta_base * weights).repeat_interleave(N - 1)       # [k*(N-1)]
+
+            # # 累加（允许重复边被多次加分）
+            # self._tau.index_put_((from_nodes, to_nodes), delta_flat, accumulate=True)
+            # # ====== 结束 ======
             self._tau.clamp_(min=0.01, max=20.0)
 
             if (it + 1) % 10 == 0:
@@ -719,7 +739,7 @@ def main():
             patients,
             machine_exam_map,
             num_ants=100,     # GPU并行评估100个解
-            max_iter=1000,     # 迭代300次
+            max_iter=3000,     # 迭代300次
             alpha=1.0,        # 关注历史经验(信息素)
             beta=5.0,         # 重点关注启发式(同类型聚类)
             rho=0.1,          # 标准挥发率
@@ -751,8 +771,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
 
 
 # from __future__ import annotations
