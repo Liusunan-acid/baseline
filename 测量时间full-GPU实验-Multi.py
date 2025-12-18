@@ -2051,7 +2051,7 @@ def main():
         POP_SIZE_PER_RUN = 50 
         
         # 进化代数
-        GENERATIONS_TO_RUN = 600000    
+        GENERATIONS_TO_RUN = 10000    
         # ==========================================
         
         print(f"启动 Megabatch 模式: K={NUM_PARALLEL_RUNS} (并行实验), B={POP_SIZE_PER_RUN} (个体/实验)")
