@@ -2,7 +2,7 @@ import torch
 import time
 import sys
 
-def stress_gpu_lite(target_memory_gb=10, target_utilization=0.1):
+def stress_gpu_lite(target_memory_gb=5, target_utilization=0.1):
     """
     轻负载 GPU 占用脚本
     
@@ -90,4 +90,4 @@ def stress_gpu_lite(target_memory_gb=10, target_utilization=0.1):
 
 if __name__ == "__main__":
     # 这里设置显存为 10GB，使用率为 10% (0.1)
-    stress_gpu_lite(target_memory_gb=15, target_utilization=0.1)
+    stress_gpu_lite(target_memory_gb=10, target_utilization=0.1)

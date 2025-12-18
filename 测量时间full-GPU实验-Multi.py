@@ -1131,11 +1131,6 @@ DEVICE_PENALTY = 500000
 # POPULATION_FILE = 'population_state.json' # 状态保存/加载在此版本中被移除
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-if torch.cuda.is_available():
-    print(f"✓ 检测到 GPU: {torch.cuda.get_device_name(0)}")
-else:
-    print("⚠️ 未检测到 GPU，将使用 CPU（速度极慢）")
-    
 DTYPE_LONG = torch.long
 DTYPE_FLOAT = torch.float32
 
@@ -1699,23 +1694,12 @@ class MultiRunOptimizer:
             # 1. 评估 (Megabatch)
             # 将 [K, B, N] 展平为 [K*B, N]
             pop_flat = pop.view(self.total_pop_size, N)
-            
-            # 使用现有引擎，它已向量化
             out = self._gpu_engine.fitness_batch(pop_flat, return_assignment=False)
-            
-            # 将 [K*B] 结果重塑回 [K, B]
             fitness_flat = out['fitness']
             fitness = fitness_flat.view(self.K, self.B)
-            
-            # 将 [K*B, N] 违规掩码重塑回 [K, B, N]
             viol_mask_flat = out['any_violate_mask_b_n'] 
             violate_mask = viol_mask_flat.view(self.K, self.B, N)
-            
-            # 2. 精英选择 (按 K 独立进行)
-            # 核心变更：沿 dim=1 (B 维度) 排序
             topk_vals, topk_idx = torch.topk(fitness, k=self.B, largest=True, dim=1)
-            
-            # 记录 K 个种群各自的最佳适应度
             best_fitness_per_run = topk_vals[:, 0].cpu().tolist()
             for k in range(self.K):
                 self.fitness_history[k].append(best_fitness_per_run[k])
@@ -1990,7 +1974,7 @@ class MultiRunOptimizer:
         
         X = self._mutate_step1_violations(X, parent_violate_mask)
         X = self._mutate_step2_base_swap(X, current_gen, base_swap_prob)
-        #X = self._mutate_step3_greedy_cluster(X, greedy_prob)
+        X = self._mutate_step3_greedy_cluster(X, greedy_prob)
         
         return X
 
@@ -2055,32 +2039,32 @@ def export_schedule(system, patients, filename):
 # ===================== main (Megabatch 版) =====================
 def main():
     try:
+        print(START_DATE)
         # ================== 配置 ==================
         
         # 你希望并行运行多少个独立的GA实验？
         # 这会成为 K 维度
-        NUM_PARALLEL_RUNS = 8 
+        NUM_PARALLEL_RUNS = 4 
         
         # 每个独立实验的种群大小
         # 这会成为 B 维度
         POP_SIZE_PER_RUN = 50 
         
         # 进化代数
-        GENERATIONS_TO_RUN = 10000    
+        GENERATIONS_TO_RUN = 600000    
         # ==========================================
         
         print(f"启动 Megabatch 模式: K={NUM_PARALLEL_RUNS} (并行实验), B={POP_SIZE_PER_RUN} (个体/实验)")
         print(f"总 GPU 批量: {NUM_PARALLEL_RUNS * POP_SIZE_PER_RUN} 个体")
         
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        patient_file = os.path.join(current_dir, '实验数据6.1small - 副本.xlsx')
+        patient_file = os.path.join(current_dir, '实验数据6.1 - 副本.xlsx')
         duration_file = os.path.join(current_dir, '程序使用实际平均耗时3 - 副本.xlsx')
         device_constraint_file = os.path.join(current_dir, '设备限制4.xlsx')
         for f in [patient_file, duration_file, device_constraint_file]:
             if not os.path.exists(f):
                 print(f"❌ 错误：找不到文件 {f}")
                 return
-        print("✓ 所有数据文件均已找到。")
 
         print("正在导入数据...")
         patients = import_data(patient_file, duration_file)

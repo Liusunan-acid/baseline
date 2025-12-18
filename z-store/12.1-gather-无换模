@@ -1,0 +1,484 @@
+✓ 检测到 GPU: NVIDIA GeForce RTX 3090
+2024-12-01 07:00:00
+启动 Megabatch 模式: K=8 (并行实验), B=50 (个体/实验)
+总 GPU 批量: 400 个体
+✓ 所有数据文件均已找到。
+正在导入数据...
+成功导入2379患者，共2379个检查
+
+===== 启动并行遗传算法优化 (Megabatch GPU) =====
+已生成 8 个并行种群 (每个 50 个个体)，总计 400 个个体
+✓ 已生成 8 个初始种群，耗时: 0.2127s
+
+开始 10000 代进化 (K=8)...
+Generation 50 | Avg Best Fitness (K=8): -192307000.00
+Generation 100 | Avg Best Fitness (K=8): -155530700.00
+Generation 150 | Avg Best Fitness (K=8): -130052500.00
+Generation 200 | Avg Best Fitness (K=8): -112690650.00
+Generation 250 | Avg Best Fitness (K=8): -100604150.00
+Generation 300 | Avg Best Fitness (K=8): -91557150.00
+Generation 350 | Avg Best Fitness (K=8): -86335500.00
+Generation 400 | Avg Best Fitness (K=8): -83294300.00
+Generation 450 | Avg Best Fitness (K=8): -81301950.00
+Generation 500 | Avg Best Fitness (K=8): -79629650.00
+Generation 550 | Avg Best Fitness (K=8): -78295000.00
+Generation 600 | Avg Best Fitness (K=8): -76956350.00
+Generation 650 | Avg Best Fitness (K=8): -75702450.00
+Generation 700 | Avg Best Fitness (K=8): -74479300.00
+Generation 750 | Avg Best Fitness (K=8): -73822400.00
+Generation 800 | Avg Best Fitness (K=8): -72973450.00
+Generation 850 | Avg Best Fitness (K=8): -72328000.00
+Generation 900 | Avg Best Fitness (K=8): -71639850.00
+Generation 950 | Avg Best Fitness (K=8): -71000800.00
+Generation 1000 | Avg Best Fitness (K=8): -70587450.00
+Generation 1050 | Avg Best Fitness (K=8): -70215900.00
+Generation 1100 | Avg Best Fitness (K=8): -69867650.00
+Generation 1150 | Avg Best Fitness (K=8): -69549100.00
+Generation 1200 | Avg Best Fitness (K=8): -69316500.00
+Generation 1250 | Avg Best Fitness (K=8): -68982650.00
+Generation 1300 | Avg Best Fitness (K=8): -68639550.00
+Generation 1350 | Avg Best Fitness (K=8): -68475600.00
+Generation 1400 | Avg Best Fitness (K=8): -68139450.00
+Generation 1450 | Avg Best Fitness (K=8): -67837350.00
+Generation 1500 | Avg Best Fitness (K=8): -67721750.00
+Generation 1550 | Avg Best Fitness (K=8): -67507600.00
+Generation 1600 | Avg Best Fitness (K=8): -67425100.00
+Generation 1650 | Avg Best Fitness (K=8): -67274500.00
+Generation 1700 | Avg Best Fitness (K=8): -67063350.00
+Generation 1750 | Avg Best Fitness (K=8): -66985000.00
+Generation 1800 | Avg Best Fitness (K=8): -66837400.00
+Generation 1850 | Avg Best Fitness (K=8): -66633950.00
+Generation 1900 | Avg Best Fitness (K=8): -66518750.00
+Generation 1950 | Avg Best Fitness (K=8): -66425100.00
+Generation 2000 | Avg Best Fitness (K=8): -66376650.00
+Generation 2050 | Avg Best Fitness (K=8): -66205500.00
+Generation 2100 | Avg Best Fitness (K=8): -66021450.00
+Generation 2150 | Avg Best Fitness (K=8): -65900000.00
+Generation 2200 | Avg Best Fitness (K=8): -65780000.00
+Generation 2250 | Avg Best Fitness (K=8): -65655400.00
+Generation 2300 | Avg Best Fitness (K=8): -65599050.00
+Generation 2350 | Avg Best Fitness (K=8): -65553650.00
+Generation 2400 | Avg Best Fitness (K=8): -65504900.00
+Generation 2450 | Avg Best Fitness (K=8): -65399900.00
+Generation 2500 | Avg Best Fitness (K=8): -65362600.00
+Generation 2550 | Avg Best Fitness (K=8): -65306550.00
+Generation 2600 | Avg Best Fitness (K=8): -65204050.00
+Generation 2650 | Avg Best Fitness (K=8): -65151750.00
+Generation 2700 | Avg Best Fitness (K=8): -64948950.00
+Generation 2750 | Avg Best Fitness (K=8): -64817700.00
+Generation 2800 | Avg Best Fitness (K=8): -64765300.00
+Generation 2850 | Avg Best Fitness (K=8): -64723000.00
+Generation 2900 | Avg Best Fitness (K=8): -64666650.00
+Generation 2950 | Avg Best Fitness (K=8): -64620200.00
+Generation 3000 | Avg Best Fitness (K=8): -64575400.00
+Generation 3050 | Avg Best Fitness (K=8): -64550300.00
+Generation 3100 | Avg Best Fitness (K=8): -64500000.00
+Generation 3150 | Avg Best Fitness (K=8): -64475000.00
+Generation 3200 | Avg Best Fitness (K=8): -64442700.00
+Generation 3250 | Avg Best Fitness (K=8): -64412800.00
+Generation 3300 | Avg Best Fitness (K=8): -64366350.00
+Generation 3350 | Avg Best Fitness (K=8): -64349150.00
+Generation 3400 | Avg Best Fitness (K=8): -64312600.00
+Generation 3450 | Avg Best Fitness (K=8): -64297500.00
+Generation 3500 | Avg Best Fitness (K=8): -64260950.00
+Generation 3550 | Avg Best Fitness (K=8): -64188350.00
+Generation 3600 | Avg Best Fitness (K=8): -64174800.00
+Generation 3650 | Avg Best Fitness (K=8): -64108650.00
+Generation 3700 | Avg Best Fitness (K=8): -64063850.00
+Generation 3750 | Avg Best Fitness (K=8): -63972900.00
+Generation 3800 | Avg Best Fitness (K=8): -63961150.00
+Generation 3850 | Avg Best Fitness (K=8): -63919050.00
+Generation 3900 | Avg Best Fitness (K=8): -63892900.00
+Generation 3950 | Avg Best Fitness (K=8): -63863000.00
+Generation 4000 | Avg Best Fitness (K=8): -63846850.00
+Generation 4050 | Avg Best Fitness (K=8): -63779150.00
+Generation 4100 | Avg Best Fitness (K=8): -63661450.00
+Generation 4150 | Avg Best Fitness (K=8): -63579050.00
+Generation 4200 | Avg Best Fitness (K=8): -63556750.00
+Generation 4250 | Avg Best Fitness (K=8): -63520400.00
+Generation 4300 | Avg Best Fitness (K=8): -63501850.00
+Generation 4350 | Avg Best Fitness (K=8): -63433000.00
+Generation 4400 | Avg Best Fitness (K=8): -63410800.00
+Generation 4450 | Avg Best Fitness (K=8): -63400700.00
+Generation 4500 | Avg Best Fitness (K=8): -63364550.00
+Generation 4550 | Avg Best Fitness (K=8): -63303300.00
+Generation 4600 | Avg Best Fitness (K=8): -63214450.00
+Generation 4650 | Avg Best Fitness (K=8): -63112600.00
+Generation 4700 | Avg Best Fitness (K=8): -63100100.00
+Generation 4750 | Avg Best Fitness (K=8): -62983750.00
+Generation 4800 | Avg Best Fitness (K=8): -62942800.00
+Generation 4850 | Avg Best Fitness (K=8): -62920600.00
+Generation 4900 | Avg Best Fitness (K=8): -62879350.00
+Generation 4950 | Avg Best Fitness (K=8): -62838100.00
+Generation 5000 | Avg Best Fitness (K=8): -62759450.00
+Generation 5050 | Avg Best Fitness (K=8): -62734250.00
+Generation 5100 | Avg Best Fitness (K=8): -62701750.00
+Generation 5150 | Avg Best Fitness (K=8): -62676550.00
+Generation 5200 | Avg Best Fitness (K=8): -62642900.00
+Generation 5250 | Avg Best Fitness (K=8): -62514350.00
+Generation 5300 | Avg Best Fitness (K=8): -62486850.00
+Generation 5350 | Avg Best Fitness (K=8): -62472050.00
+Generation 5400 | Avg Best Fitness (K=8): -62458400.00
+Generation 5450 | Avg Best Fitness (K=8): -62396000.00
+Generation 5500 | Avg Best Fitness (K=8): -62377900.00
+Generation 5550 | Avg Best Fitness (K=8): -62339950.00
+Generation 5600 | Avg Best Fitness (K=8): -62247250.00
+Generation 5650 | Avg Best Fitness (K=8): -62220700.00
+Generation 5700 | Avg Best Fitness (K=8): -62201950.00
+Generation 5750 | Avg Best Fitness (K=8): -62178200.00
+Generation 5800 | Avg Best Fitness (K=8): -62162800.00
+Generation 5850 | Avg Best Fitness (K=8): -62146650.00
+Generation 5900 | Avg Best Fitness (K=8): -62140300.00
+Generation 5950 | Avg Best Fitness (K=8): -62124050.00
+Generation 6000 | Avg Best Fitness (K=8): -62119150.00
+Generation 6050 | Avg Best Fitness (K=8): -62045700.00
+Generation 6100 | Avg Best Fitness (K=8): -62033100.00
+Generation 6150 | Avg Best Fitness (K=8): -62027900.00
+Generation 6200 | Avg Best Fitness (K=8): -62025400.00
+Generation 6250 | Avg Best Fitness (K=8): -62004450.00
+Generation 6300 | Avg Best Fitness (K=8): -61995600.00
+Generation 6350 | Avg Best Fitness (K=8): -61984450.00
+Generation 6400 | Avg Best Fitness (K=8): -61970700.00
+Generation 6450 | Avg Best Fitness (K=8): -61908200.00
+Generation 6500 | Avg Best Fitness (K=8): -61834250.00
+Generation 6550 | Avg Best Fitness (K=8): -61829150.00
+Generation 6600 | Avg Best Fitness (K=8): -61826650.00
+Generation 6650 | Avg Best Fitness (K=8): -61804350.00
+Generation 6700 | Avg Best Fitness (K=8): -61785400.00
+Generation 6750 | Avg Best Fitness (K=8): -61767800.00
+Generation 6800 | Avg Best Fitness (K=8): -61762800.00
+Generation 6850 | Avg Best Fitness (K=8): -61740300.00
+Generation 6900 | Avg Best Fitness (K=8): -61730200.00
+Generation 6950 | Avg Best Fitness (K=8): -61717600.00
+Generation 7000 | Avg Best Fitness (K=8): -61709900.00
+Generation 7050 | Avg Best Fitness (K=8): -61678850.00
+Generation 7100 | Avg Best Fitness (K=8): -61667900.00
+Generation 7150 | Avg Best Fitness (K=8): -61608750.00
+Generation 7200 | Avg Best Fitness (K=8): -61591250.00
+Generation 7250 | Avg Best Fitness (K=8): -61563950.00
+Generation 7300 | Avg Best Fitness (K=8): -61538950.00
+Generation 7350 | Avg Best Fitness (K=8): -61518950.00
+Generation 7400 | Avg Best Fitness (K=8): -61505100.00
+Generation 7450 | Avg Best Fitness (K=8): -61493850.00
+Generation 7500 | Avg Best Fitness (K=8): -61486450.00
+Generation 7550 | Avg Best Fitness (K=8): -61471350.00
+Generation 7600 | Avg Best Fitness (K=8): -61466450.00
+Generation 7650 | Avg Best Fitness (K=8): -61451450.00
+Generation 7700 | Avg Best Fitness (K=8): -61441550.00
+Generation 7750 | Avg Best Fitness (K=8): -61427600.00
+Generation 7800 | Avg Best Fitness (K=8): -61417700.00
+Generation 7850 | Avg Best Fitness (K=8): -61392700.00
+Generation 7900 | Avg Best Fitness (K=8): -61372600.00
+Generation 7950 | Avg Best Fitness (K=8): -61366450.00
+Generation 8000 | Avg Best Fitness (K=8): -61345200.00
+Generation 8050 | Avg Best Fitness (K=8): -61336550.00
+Generation 8100 | Avg Best Fitness (K=8): -61328850.00
+Generation 8150 | Avg Best Fitness (K=8): -61316250.00
+Generation 8200 | Avg Best Fitness (K=8): -61312500.00
+Generation 8250 | Avg Best Fitness (K=8): -61297300.00
+Generation 8300 | Avg Best Fitness (K=8): -61232100.00
+Generation 8350 | Avg Best Fitness (K=8): -61224600.00
+Generation 8400 | Avg Best Fitness (K=8): -61217100.00
+Generation 8450 | Avg Best Fitness (K=8): -61193450.00
+Generation 8500 | Avg Best Fitness (K=8): -61175950.00
+Generation 8550 | Avg Best Fitness (K=8): -61165850.00
+Generation 8600 | Avg Best Fitness (K=8): -61153050.00
+Generation 8650 | Avg Best Fitness (K=8): -61148050.00
+Generation 8700 | Avg Best Fitness (K=8): -61145650.00
+Generation 8750 | Avg Best Fitness (K=8): -61140550.00
+Generation 8800 | Avg Best Fitness (K=8): -61095650.00
+Generation 8850 | Avg Best Fitness (K=8): -61094500.00
+Generation 8900 | Avg Best Fitness (K=8): -61083350.00
+Generation 8950 | Avg Best Fitness (K=8): -61065850.00
+Generation 9000 | Avg Best Fitness (K=8): -61058350.00
+Generation 9050 | Avg Best Fitness (K=8): -61039500.00
+Generation 9100 | Avg Best Fitness (K=8): -61032100.00
+Generation 9150 | Avg Best Fitness (K=8): -61021900.00
+Generation 9200 | Avg Best Fitness (K=8): -61010550.00
+Generation 9250 | Avg Best Fitness (K=8): -61005450.00
+Generation 9300 | Avg Best Fitness (K=8): -60943050.00
+Generation 9350 | Avg Best Fitness (K=8): -60939200.00
+Generation 9400 | Avg Best Fitness (K=8): -60938050.00
+Generation 9450 | Avg Best Fitness (K=8): -60935550.00
+Generation 9500 | Avg Best Fitness (K=8): -60844600.00
+Generation 9550 | Avg Best Fitness (K=8): -60823450.00
+Generation 9600 | Avg Best Fitness (K=8): -60753450.00
+Generation 9650 | Avg Best Fitness (K=8): -60747100.00
+Generation 9700 | Avg Best Fitness (K=8): -60739600.00
+Generation 9750 | Avg Best Fitness (K=8): -60736050.00
+Generation 9800 | Avg Best Fitness (K=8): -60713550.00
+Generation 9850 | Avg Best Fitness (K=8): -60661250.00
+Generation 9900 | Avg Best Fitness (K=8): -60648750.00
+Generation 9950 | Avg Best Fitness (K=8): -60631150.00
+Generation 10000 | Avg Best Fitness (K=8): -60626150.00
+进化完成。正在提取 K 个最佳个体...
+
+✓ 进化完成 (K=8)，总耗时: 286.19s
+  平均每代耗时: 0.0286 s/gen
+  (总计 80000 个 'run-generations')
+
+===== 正在导出 8 个最佳排程 =====
+  Run 0: Best Fitness: -61405600.00
+    ✓ 已导出至 output_schedules/final_schedule_RUN0_20251217_202324_fit_-61405600.xlsx
+  Run 1: Best Fitness: -60913200.00
+    ✓ 已导出至 output_schedules/final_schedule_RUN1_20251217_202324_fit_-60913200.xlsx
+  Run 2: Best Fitness: -66566400.00
+    ✓ 已导出至 output_schedules/final_schedule_RUN2_20251217_202324_fit_-66566400.xlsx
+  Run 3: Best Fitness: -56832000.00
+    ✓ 已导出至 output_schedules/final_schedule_RUN3_20251217_202324_fit_-56832000.xlsx
+  Run 4: Best Fitness: -58643600.00
+    ✓ 已导出至 output_schedules/final_schedule_RUN4_20251217_202324_fit_-58643600.xlsx
+  Run 5: Best Fitness: -59414000.00
+    ✓ 已导出至 output_schedules/final_schedule_RUN5_20251217_202324_fit_-59414000.xlsx
+  Run 6: Best Fitness: -58533600.00
+    ✓ 已导出至 output_schedules/final_schedule_RUN6_20251217_202324_fit_-58533600.xlsx
+  Run 7: Best Fitness: -62700800.00
+    ✓ 已导出至 output_schedules/final_schedule_RUN7_20251217_202324_fit_-62700800.xlsx
+
+===== 最终统计 (K={NUM_PARALLEL_RUNS}) =====
+  最佳适应度 (均值): -60626150.00
+  最佳适应度 (标准差): 2838459.85
+  最佳适应度 (范围): -66566400.00 ... -56832000.00
+
+所有运行均已完成。
+(base) preprocess@ps:~/_funsearch/baseline$ 
+
+
+
+
+
+
+
+
+
+2024-12-01 07:00:00
+启动 Megabatch 模式: K=4 (并行实验), B=50 (个体/实验)
+总 GPU 批量: 200 个体
+正在导入数据...
+成功导入7913患者，共7913个检查
+
+===== 启动并行遗传算法优化 (Megabatch GPU) =====
+已生成 4 个并行种群 (每个 50 个个体)，总计 200 个个体
+✓ 已生成 4 个初始种群，耗时: 0.2699s
+
+开始 10000 代进化 (K=4)...
+Generation 50 | Avg Best Fitness (K=4): -712918512.00
+Generation 100 | Avg Best Fitness (K=4): -642979376.00
+Generation 150 | Avg Best Fitness (K=4): -586919488.00
+Generation 200 | Avg Best Fitness (K=4): -537390112.00
+Generation 250 | Avg Best Fitness (K=4): -492607696.00
+Generation 300 | Avg Best Fitness (K=4): -452136808.00
+Generation 350 | Avg Best Fitness (K=4): -419191600.00
+Generation 400 | Avg Best Fitness (K=4): -389287504.00
+Generation 450 | Avg Best Fitness (K=4): -362583200.00
+Generation 500 | Avg Best Fitness (K=4): -340429496.00
+Generation 550 | Avg Best Fitness (K=4): -319100304.00
+Generation 600 | Avg Best Fitness (K=4): -302547096.00
+Generation 650 | Avg Best Fitness (K=4): -287652800.00
+Generation 700 | Avg Best Fitness (K=4): -275624492.00
+Generation 750 | Avg Best Fitness (K=4): -266238296.00
+Generation 800 | Avg Best Fitness (K=4): -257988100.00
+Generation 850 | Avg Best Fitness (K=4): -250879400.00
+Generation 900 | Avg Best Fitness (K=4): -244437200.00
+Generation 950 | Avg Best Fitness (K=4): -239405300.00
+Generation 1000 | Avg Best Fitness (K=4): -234532800.00
+Generation 1050 | Avg Best Fitness (K=4): -230703500.00
+Generation 1100 | Avg Best Fitness (K=4): -227258500.00
+Generation 1150 | Avg Best Fitness (K=4): -223710900.00
+Generation 1200 | Avg Best Fitness (K=4): -220541500.00
+Generation 1250 | Avg Best Fitness (K=4): -218013200.00
+Generation 1300 | Avg Best Fitness (K=4): -216093700.00
+Generation 1350 | Avg Best Fitness (K=4): -214167500.00
+Generation 1400 | Avg Best Fitness (K=4): -212617500.00
+Generation 1450 | Avg Best Fitness (K=4): -211270300.00
+Generation 1500 | Avg Best Fitness (K=4): -208940100.00
+Generation 1550 | Avg Best Fitness (K=4): -207313600.00
+Generation 1600 | Avg Best Fitness (K=4): -205886100.00
+Generation 1650 | Avg Best Fitness (K=4): -204885100.00
+Generation 1700 | Avg Best Fitness (K=4): -203491400.00
+Generation 1750 | Avg Best Fitness (K=4): -202102100.00
+Generation 1800 | Avg Best Fitness (K=4): -200932100.00
+Generation 1850 | Avg Best Fitness (K=4): -199936700.00
+Generation 1900 | Avg Best Fitness (K=4): -198994600.00
+Generation 1950 | Avg Best Fitness (K=4): -198340200.00
+Generation 2000 | Avg Best Fitness (K=4): -197558200.00
+Generation 2050 | Avg Best Fitness (K=4): -196760300.00
+Generation 2100 | Avg Best Fitness (K=4): -195792100.00
+Generation 2150 | Avg Best Fitness (K=4): -194982300.00
+Generation 2200 | Avg Best Fitness (K=4): -193897300.00
+Generation 2250 | Avg Best Fitness (K=4): -192482300.00
+Generation 2300 | Avg Best Fitness (K=4): -192129200.00
+Generation 2350 | Avg Best Fitness (K=4): -191659000.00
+Generation 2400 | Avg Best Fitness (K=4): -190841700.00
+Generation 2450 | Avg Best Fitness (K=4): -190302100.00
+Generation 2500 | Avg Best Fitness (K=4): -189806100.00
+Generation 2550 | Avg Best Fitness (K=4): -189176100.00
+Generation 2600 | Avg Best Fitness (K=4): -188575500.00
+Generation 2650 | Avg Best Fitness (K=4): -188128000.00
+Generation 2700 | Avg Best Fitness (K=4): -187731400.00
+Generation 2750 | Avg Best Fitness (K=4): -187361000.00
+Generation 2800 | Avg Best Fitness (K=4): -186840400.00
+Generation 2850 | Avg Best Fitness (K=4): -186552100.00
+Generation 2900 | Avg Best Fitness (K=4): -186174000.00
+Generation 2950 | Avg Best Fitness (K=4): -185712600.00
+Generation 3000 | Avg Best Fitness (K=4): -184982600.00
+Generation 3050 | Avg Best Fitness (K=4): -184511400.00
+Generation 3100 | Avg Best Fitness (K=4): -184108700.00
+Generation 3150 | Avg Best Fitness (K=4): -183866000.00
+Generation 3200 | Avg Best Fitness (K=4): -183663900.00
+Generation 3250 | Avg Best Fitness (K=4): -183203700.00
+Generation 3300 | Avg Best Fitness (K=4): -182748500.00
+Generation 3350 | Avg Best Fitness (K=4): -182278900.00
+Generation 3400 | Avg Best Fitness (K=4): -182068900.00
+Generation 3450 | Avg Best Fitness (K=4): -181798500.00
+Generation 3500 | Avg Best Fitness (K=4): -181135400.00
+Generation 3550 | Avg Best Fitness (K=4): -180627100.00
+Generation 3600 | Avg Best Fitness (K=4): -179981900.00
+Generation 3650 | Avg Best Fitness (K=4): -179731700.00
+Generation 3700 | Avg Best Fitness (K=4): -179596300.00
+Generation 3750 | Avg Best Fitness (K=4): -179208800.00
+Generation 3800 | Avg Best Fitness (K=4): -178996500.00
+Generation 3850 | Avg Best Fitness (K=4): -178778800.00
+Generation 3900 | Avg Best Fitness (K=4): -178456100.00
+Generation 3950 | Avg Best Fitness (K=4): -178055900.00
+Generation 4000 | Avg Best Fitness (K=4): -177942600.00
+Generation 4050 | Avg Best Fitness (K=4): -177492600.00
+Generation 4100 | Avg Best Fitness (K=4): -177222600.00
+Generation 4150 | Avg Best Fitness (K=4): -176989900.00
+Generation 4200 | Avg Best Fitness (K=4): -176790300.00
+Generation 4250 | Avg Best Fitness (K=4): -176533700.00
+Generation 4300 | Avg Best Fitness (K=4): -176388300.00
+Generation 4350 | Avg Best Fitness (K=4): -176017900.00
+Generation 4400 | Avg Best Fitness (K=4): -175742300.00
+Generation 4450 | Avg Best Fitness (K=4): -175429200.00
+Generation 4500 | Avg Best Fitness (K=4): -175059000.00
+Generation 4550 | Avg Best Fitness (K=4): -174758200.00
+Generation 4600 | Avg Best Fitness (K=4): -174528400.00
+Generation 4650 | Avg Best Fitness (K=4): -174243200.00
+Generation 4700 | Avg Best Fitness (K=4): -173980700.00
+Generation 4750 | Avg Best Fitness (K=4): -173825700.00
+Generation 4800 | Avg Best Fitness (K=4): -173726100.00
+Generation 4850 | Avg Best Fitness (K=4): -173557800.00
+Generation 4900 | Avg Best Fitness (K=4): -173337800.00
+Generation 4950 | Avg Best Fitness (K=4): -173024500.00
+Generation 5000 | Avg Best Fitness (K=4): -172755100.00
+Generation 5050 | Avg Best Fitness (K=4): -172424900.00
+Generation 5100 | Avg Best Fitness (K=4): -172280100.00
+Generation 5150 | Avg Best Fitness (K=4): -171955700.00
+Generation 5200 | Avg Best Fitness (K=4): -171870700.00
+Generation 5250 | Avg Best Fitness (K=4): -171758200.00
+Generation 5300 | Avg Best Fitness (K=4): -171618000.00
+Generation 5350 | Avg Best Fitness (K=4): -171478000.00
+Generation 5400 | Avg Best Fitness (K=4): -171277600.00
+Generation 5450 | Avg Best Fitness (K=4): -171125300.00
+Generation 5500 | Avg Best Fitness (K=4): -170951600.00
+Generation 5550 | Avg Best Fitness (K=4): -170717200.00
+Generation 5600 | Avg Best Fitness (K=4): -170561600.00
+Generation 5650 | Avg Best Fitness (K=4): -170476400.00
+Generation 5700 | Avg Best Fitness (K=4): -170239100.00
+Generation 5750 | Avg Best Fitness (K=4): -170119300.00
+Generation 5800 | Avg Best Fitness (K=4): -169896800.00
+Generation 5850 | Avg Best Fitness (K=4): -169766400.00
+Generation 5900 | Avg Best Fitness (K=4): -169671200.00
+Generation 5950 | Avg Best Fitness (K=4): -169396400.00
+Generation 6000 | Avg Best Fitness (K=4): -169128900.00
+Generation 6050 | Avg Best Fitness (K=4): -168991200.00
+Generation 6100 | Avg Best Fitness (K=4): -168953900.00
+Generation 6150 | Avg Best Fitness (K=4): -168881000.00
+Generation 6200 | Avg Best Fitness (K=4): -168766200.00
+Generation 6250 | Avg Best Fitness (K=4): -168675200.00
+Generation 6300 | Avg Best Fitness (K=4): -168485400.00
+Generation 6350 | Avg Best Fitness (K=4): -168310800.00
+Generation 6400 | Avg Best Fitness (K=4): -168201400.00
+Generation 6450 | Avg Best Fitness (K=4): -168121400.00
+Generation 6500 | Avg Best Fitness (K=4): -167925800.00
+Generation 6550 | Avg Best Fitness (K=4): -167850000.00
+Generation 6600 | Avg Best Fitness (K=4): -167770600.00
+Generation 6650 | Avg Best Fitness (K=4): -167726000.00
+Generation 6700 | Avg Best Fitness (K=4): -167704100.00
+Generation 6750 | Avg Best Fitness (K=4): -167648900.00
+Generation 6800 | Avg Best Fitness (K=4): -167578900.00
+Generation 6850 | Avg Best Fitness (K=4): -167523500.00
+Generation 6900 | Avg Best Fitness (K=4): -167420400.00
+Generation 6950 | Avg Best Fitness (K=4): -167244800.00
+Generation 7000 | Avg Best Fitness (K=4): -167123100.00
+Generation 7050 | Avg Best Fitness (K=4): -167085600.00
+Generation 7100 | Avg Best Fitness (K=4): -167013700.00
+Generation 7150 | Avg Best Fitness (K=4): -166928700.00
+Generation 7200 | Avg Best Fitness (K=4): -166773700.00
+Generation 7250 | Avg Best Fitness (K=4): -166718100.00
+Generation 7300 | Avg Best Fitness (K=4): -166578100.00
+Generation 7350 | Avg Best Fitness (K=4): -166468100.00
+Generation 7400 | Avg Best Fitness (K=4): -166380400.00
+Generation 7450 | Avg Best Fitness (K=4): -166235200.00
+Generation 7500 | Avg Best Fitness (K=4): -166125000.00
+Generation 7550 | Avg Best Fitness (K=4): -166054200.00
+Generation 7600 | Avg Best Fitness (K=4): -165999000.00
+Generation 7650 | Avg Best Fitness (K=4): -165944200.00
+Generation 7700 | Avg Best Fitness (K=4): -165869400.00
+Generation 7750 | Avg Best Fitness (K=4): -165769600.00
+Generation 7800 | Avg Best Fitness (K=4): -165639400.00
+Generation 7850 | Avg Best Fitness (K=4): -165404200.00
+Generation 7900 | Avg Best Fitness (K=4): -165338600.00
+Generation 7950 | Avg Best Fitness (K=4): -165182100.00
+Generation 8000 | Avg Best Fitness (K=4): -164964000.00
+Generation 8050 | Avg Best Fitness (K=4): -164669800.00
+Generation 8100 | Avg Best Fitness (K=4): -164575000.00
+Generation 8150 | Avg Best Fitness (K=4): -164480000.00
+Generation 8200 | Avg Best Fitness (K=4): -164289800.00
+Generation 8250 | Avg Best Fitness (K=4): -164274200.00
+Generation 8300 | Avg Best Fitness (K=4): -164219400.00
+Generation 8350 | Avg Best Fitness (K=4): -164168800.00
+Generation 8400 | Avg Best Fitness (K=4): -164123400.00
+Generation 8450 | Avg Best Fitness (K=4): -164088600.00
+Generation 8500 | Avg Best Fitness (K=4): -164023000.00
+Generation 8550 | Avg Best Fitness (K=4): -163888000.00
+Generation 8600 | Avg Best Fitness (K=4): -163847400.00
+Generation 8650 | Avg Best Fitness (K=4): -163753200.00
+Generation 8700 | Avg Best Fitness (K=4): -163693800.00
+Generation 8750 | Avg Best Fitness (K=4): -163653600.00
+Generation 8800 | Avg Best Fitness (K=4): -163628200.00
+Generation 8850 | Avg Best Fitness (K=4): -163573200.00
+Generation 8900 | Avg Best Fitness (K=4): -163422800.00
+Generation 8950 | Avg Best Fitness (K=4): -163398000.00
+Generation 9000 | Avg Best Fitness (K=4): -163267800.00
+Generation 9050 | Avg Best Fitness (K=4): -163252800.00
+Generation 9100 | Avg Best Fitness (K=4): -163187600.00
+Generation 9150 | Avg Best Fitness (K=4): -163144700.00
+Generation 9200 | Avg Best Fitness (K=4): -163115100.00
+Generation 9250 | Avg Best Fitness (K=4): -163047600.00
+Generation 9300 | Avg Best Fitness (K=4): -163003200.00
+Generation 9350 | Avg Best Fitness (K=4): -162793200.00
+Generation 9400 | Avg Best Fitness (K=4): -162765900.00
+Generation 9450 | Avg Best Fitness (K=4): -162735300.00
+Generation 9500 | Avg Best Fitness (K=4): -162704900.00
+Generation 9550 | Avg Best Fitness (K=4): -162684700.00
+Generation 9600 | Avg Best Fitness (K=4): -162489700.00
+Generation 9650 | Avg Best Fitness (K=4): -162425700.00
+Generation 9700 | Avg Best Fitness (K=4): -162379500.00
+Generation 9750 | Avg Best Fitness (K=4): -162322400.00
+Generation 9800 | Avg Best Fitness (K=4): -162297400.00
+Generation 9850 | Avg Best Fitness (K=4): -162267000.00
+Generation 9900 | Avg Best Fitness (K=4): -162206800.00
+Generation 9950 | Avg Best Fitness (K=4): -162171200.00
+Generation 10000 | Avg Best Fitness (K=4): -162126600.00
+进化完成。正在提取 K 个最佳个体...
+
+✓ 进化完成 (K=4)，总耗时: 1288.55s
+  平均每代耗时: 0.1289 s/gen
+  (总计 40000 个 'run-generations')
+
+===== 正在导出 4 个最佳排程 =====
+  Run 0: Best Fitness: -163867600.00
+    ✓ 已导出至 output_schedules/final_schedule_RUN0_20251217_213507_fit_-163867600.xlsx
+  Run 1: Best Fitness: -160060000.00
+    ✓ 已导出至 output_schedules/final_schedule_RUN1_20251217_213507_fit_-160060000.xlsx
+  Run 2: Best Fitness: -158872000.00
+    ✓ 已导出至 output_schedules/final_schedule_RUN2_20251217_213507_fit_-158872000.xlsx
+  Run 3: Best Fitness: -165706800.00
+    ✓ 已导出至 output_schedules/final_schedule_RUN3_20251217_213507_fit_-165706800.xlsx
+
+===== 最终统计 (K={NUM_PARALLEL_RUNS}) =====
+  最佳适应度 (均值): -162126600.00
+  最佳适应度 (标准差): 2770928.08
+  最佳适应度 (范围): -165706800.00 ... -158872000.00

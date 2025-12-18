@@ -1621,6 +1621,58 @@ class BlockGeneticOptimizer:
         X[viol_rows_idx, cand_idx_in_row] = val1
         
         return X
+    # def _mutate_step1_violations(self, X: torch.Tensor, parent_violate_mask: torch.Tensor) -> torch.Tensor:
+    #     """
+    #     Step1: 违规导向 swap（患者级）
+    #     - 先在每个个体中从“违规患者集合”里随机挑一个 violator_id
+    #     - 再在该个体排列中定位 violator_id 的索引 viol_idx
+    #     - 最后在 [viol_idx, viol_idx+400] 的窗口内随机挑一个位置 cand_idx 与其 swap
+    #     """
+    #     C, N = X.shape
+    #     if parent_violate_mask is None:
+    #         return X
+
+    #     # 哪些个体存在违规
+    #     any_viol_per_row = torch.any(parent_violate_mask, dim=1)
+    #     viol_rows_idx = torch.nonzero(any_viol_per_row, as_tuple=False).flatten()
+    #     R = viol_rows_idx.numel()
+    #     if R == 0:
+    #         return X
+
+    #     # ===== (1) 患者级：先抽“违规患者ID” =====
+    #     viol_mask_subset = parent_violate_mask[viol_rows_idx]  # [R, N]
+    #     # 先随机抽一个违规位置（对应一个违规患者ID）
+    #     viol_pos = torch.multinomial(viol_mask_subset.float(), 1, replacement=True).flatten()  # [R]
+    #     violator_id = X[viol_rows_idx, viol_pos]  # [R]
+
+    #     # ===== (2) 再定位该患者在排列中的位置（患者级核心） =====
+    #     # 每行只有一个匹配（排列中患者ID唯一），argmax 得到其索引
+    #     matches = (X[viol_rows_idx] == violator_id.unsqueeze(1))  # [R, N] bool
+    #     viol_idx = matches.float().argmax(dim=1)  # [R]
+
+    #     # ===== (3) 在窗口内选另一个位置并 swap（按 origin 的单边窗口：idx ~ idx+400） =====
+    #     low = viol_idx
+    #     high = torch.clamp(viol_idx + 400, max=N - 1)
+    #     range_size = high - low + 1
+    #     range_size = torch.where(range_size <= 0, 1, range_size)
+
+    #     rand_offset = torch.floor(torch.rand(R, device=DEVICE) * range_size).long()
+    #     cand_idx = low + rand_offset
+
+    #     # 若抽到同一个位置且窗口长度>1，则修正为另一个位置
+    #     cand_idx = torch.where(
+    #         (cand_idx == viol_idx) & (range_size > 1),
+    #         torch.where(viol_idx == low, low + 1, low),
+    #         cand_idx
+    #     )
+    #     cand_idx = torch.clamp(cand_idx, 0, N - 1)
+
+    #     # swap
+    #     v1 = X[viol_rows_idx, viol_idx]
+    #     v2 = X[viol_rows_idx, cand_idx]
+    #     X[viol_rows_idx, viol_idx] = v2
+    #     X[viol_rows_idx, cand_idx] = v1
+    #     return X
         
     def _mutate_step2_base_swap(self, X: torch.Tensor, current_gen: int, base_swap_prob: float = 0.95) -> torch.Tensor:
         C, N = X.shape
@@ -1637,7 +1689,7 @@ class BlockGeneticOptimizer:
         idx1 = torch.randint(0, N, (R,), device=DEVICE)
         
         if use_range_limit:
-            low = torch.clamp(idx1 - 0, min=0)
+            low = torch.clamp(idx1 - 400, min=0)
             high = torch.clamp(idx1 + 400, max=N-1)
             range_size = high - low + 1
             range_size = torch.where(range_size <= 0, 1, range_size) # 修复
@@ -1696,7 +1748,7 @@ class BlockGeneticOptimizer:
         
         X = self._mutate_step1_violations(X, parent_violate_mask)
         X = self._mutate_step2_base_swap(X, current_gen, base_swap_prob)
-        #X = self._mutate_step3_greedy_cluster(X, greedy_prob)
+        X = self._mutate_step3_greedy_cluster(X, greedy_prob)
         
         return X
 
@@ -1843,7 +1895,7 @@ def main():
         print(f"✓ 已生成初始种群 (大小: {len(optimizer.population)})，耗时: {t_init:.4f}s")
 
 
-        generations_to_run = 20000
+        generations_to_run = 3000
         print(f"\n开始 {generations_to_run} 代进化...")
         t0 = time.perf_counter()
         final_population = optimizer.evolve_gpu(generations=generations_to_run, elite_size=5)
