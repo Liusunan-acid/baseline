@@ -811,7 +811,7 @@ def main():
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
     try:
-        patient_file = os.path.join(BASE_DIR, '实验数据6.1small - 副本.xlsx')
+        patient_file = os.path.join(BASE_DIR, '实验数据6.1 - 副本.xlsx')
         duration_file = os.path.join(BASE_DIR, '程序使用实际平均耗时3 - 副本.xlsx')
         output_file = os.path.join(os.path.expanduser('~'), 'Desktop', '优化算法结果.xlsx')
         output_dir = os.path.join(BASE_DIR, 'output')

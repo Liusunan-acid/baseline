@@ -15,23 +15,20 @@ import torch
 
 # ===================== 全局常量 =====================
 WEEKDAY_END_HOURS = {1: 5.3, 2: 4.9, 3: 3.5, 4: 3.8, 5: 5.7, 6: 1.7, 7: 1.7}
+TIME_SCALE = 100
 WORK_START = datetime.strptime('07:00', '%H:%M').time()
 TRANSITION_PENALTY = 20000
 LOGICAL = 10000
 SELF_SELECTED_PENALTY = 8000
 NON_SELF_PENALTY = 800
-START_DATE = datetime(2024, 12, 1, 7, 0)
+START_DATE = datetime(2025, 1, 1, 7, 0)
 MACHINE_COUNT = 6
 DEVICE_PENALTY = 500000
-# POPULATION_FILE = 'population_state.json' # 状态保存/加载在此版本中被移除
-
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DTYPE_LONG = torch.long
 DTYPE_FLOAT = torch.float32
 
-# ===================== 工具函数 =====================
-# (工具函数 ... clean_exam_name, safe_read_excel, import_data, import_device_constraints ... 保持不变)
-
+# ===================== 工具函数 ====================
 def clean_exam_name(name):
     s = str(name).strip().lower()
     s = re.sub(r'[（）]', lambda x: '(' if x.group() == '（' else ')', s)
@@ -92,7 +89,6 @@ def import_data(patient_file, duration_file):
         traceback.print_exc()
         raise
 
-
 def import_device_constraints(file_path):
     try:
         df = safe_read_excel(file_path)
@@ -135,7 +131,6 @@ class MachineSchedule:
         ))
         self.day_end_time[date] = end_time
         return end_time
-
 
 class SchedulingSystem:
     def __init__(self, machine_exam_map, start_date=None):
@@ -185,7 +180,7 @@ class SchedulingSystem:
 # ===================== GPU 适配度引擎 =====================
 
 def _weekday_minutes_matrix_from_end_hours(M: int) -> torch.Tensor:
-    hours = [int(round((15.0 - WEEKDAY_END_HOURS[d]) * 60)) for d in range(1, 8)]
+    hours = [int(round((15.0 - WEEKDAY_END_HOURS[d]) * 60 * TIME_SCALE)) for d in range(1, 8)]
     return torch.tensor([[m] * M for m in hours], dtype=DTYPE_LONG, device=DEVICE)
 
 
@@ -482,7 +477,7 @@ class MultiRunOptimizer:
             counter: Dict[int, int] = defaultdict(int)
             for _, et, dur, _ in p['exams']:
                 etn = clean_exam_name(et)
-                total_minutes += int(round(float(dur)))
+                total_minutes += int(round(float(dur) * TIME_SCALE))
                 exam_types_seq.append(etn)
                 p_exam_types.append(etn) # 收集类型
                 if E > 0:
@@ -492,7 +487,7 @@ class MultiRunOptimizer:
                         counter[eidx] += 1
                 any_contrast = any_contrast or ('增强' in etn)
                 any_heart = any_heart or ('心脏' in etn)
-                any_angio = any_angio or ('造影' in etn)
+                any_angio = any_angio or ('关节造影' in etn)
             
             # 兼容性逻辑：用于 mutation 的 ID (出现次数最多的)
             if len(counter) > 0:
@@ -526,11 +521,7 @@ class MultiRunOptimizer:
                         machine_exam_mask[mid, eidx] = True
 
         weekday_machine_minutes = _weekday_minutes_matrix_from_end_hours(MACHINE_COUNT)
-        
-        # 必须将局部变量 patient_main_type_id 保存到 self 属性中
-        # 否则后续的变异算子 (_mutate_batch 等) 调用 self._patient_main_exam_id 时会报错
-        # 注意：这里我们使用 patient_main_exam_id (基于计数的) 赋值给 self._patient_main_exam_id，
-        # 保持 mutation 逻辑不变，同时传递 patient_main_type_id 给引擎做罚分。
+    
         self._patient_main_exam_id = patient_main_exam_id
         
         self._gpu_engine = _GPUMatrixFitnessBatch(
@@ -663,7 +654,6 @@ class MultiRunOptimizer:
                     mixed_parent_idx.unsqueeze(2).expand(-1, -1, N)
                 )
 
-
                 # 有序交叉
                 P1_flat = P1.view(self.K * num_children, N)
                 P2_flat = P2.view(self.K * num_children, N)
@@ -684,11 +674,17 @@ class MultiRunOptimizer:
                 pop = elites.clone()
 
             self.population_tensor = pop
-
-            # 打印进度：用 gen_idx+1，而不是 self.current_generation，避免显示全是 1
             if (gen_idx + 1) % 50 == 0:
                 avg_best_fit = sum(best_fitness_per_run) / self.K
-                print(f"Generation {gen_idx+1} | Avg Best Fitness (K={self.K}): {avg_best_fit:.2f}")
+                flat_viols = (out['heart_cnt'] + out['angio_cnt'] + 
+                              out['weekend_cnt'] + out['device_cnt'])
+                best_viols = torch.gather(
+                    flat_viols.view(self.K, self.B), 
+                    1, 
+                    topk_idx[:, :1]
+                )
+                avg_viols = best_viols.float().mean().item()
+                print(f"Generation {gen_idx+1} | Avg Best Fitness (K={self.K}): {avg_best_fit:.2f} | Avg Violations: {avg_viols:.2f}")
 
             self.current_generation += 1
 
@@ -759,87 +755,58 @@ class MultiRunOptimizer:
         parent_violate_mask: torch.Tensor,
         n_swaps_per_individual: int = 1
     ) -> torch.Tensor:
-        """
-        严格“患者级”定点修复（对齐 original 的语义）+ 更强修复力度：
-        - parent_violate_mask[c, pid]=True 表示：父代个体 c 的违规患者集合
-        - 在当前子代 X[c] 中定位该 pid 的位置，并在 ±400 邻域随机交换
-        - 每个个体一轮可执行 n_swaps_per_individual 次（而不是只抽 1 个）
-        """
         C, N = X.shape
-
-        # 形状不匹配时直接跳过（例如异构子种群 padding 的情况）
         if parent_violate_mask is None or parent_violate_mask.shape != X.shape:
             return X
-
         if n_swaps_per_individual <= 0:
             return X
-
         any_viol = torch.any(parent_violate_mask, dim=1)  # [C]
         rows = torch.nonzero(any_viol, as_tuple=False).flatten()
         R = rows.numel()
         if R == 0:
             return X
-
-        # 只取有违规的行
         mask_sub = parent_violate_mask[rows]  # [R, N]
         X_sub = X[rows]                       # [R, N]
 
-        # 每行违规患者数量（用于限制最多修几次，避免无意义重复）
         viol_cnt = mask_sub.sum(dim=1).clamp(min=1)  # [R]
-        # 每行最多修复次数：min(n_swaps_per_individual, 违规患者数)
         max_swaps = torch.minimum(
             torch.full_like(viol_cnt, n_swaps_per_individual, device=DEVICE),
             viol_cnt
         )
 
-        # 为了“最小改动 + 简洁”，这里用一个小循环做多次 swap（每次仍是 GPU 张量操作）
         for _ in range(int(n_swaps_per_individual)):
-            # 仅对还没达到 max_swaps 的行继续
-            # trick：用一个计数器向量记录已做次数
-            # 我们用递减方式：每次对 max_swaps>0 的行做一次，然后 max_swaps -= 1
             active = max_swaps > 0
             active_rows = torch.nonzero(active, as_tuple=False).flatten()
             if active_rows.numel() == 0:
                 break
 
-            # 活跃行子集
             m = mask_sub[active_rows]  # [Ra, N]
             x = X_sub[active_rows]     # [Ra, N]
             Ra = active_rows.numel()
 
-            # 1) 每行随机抽一个违规患者 pid（患者级）
             viol_pid = torch.multinomial(m.float(), 1, replacement=True).flatten()  # [Ra]
-
-            # 2) 在当前子代中定位该患者位置（排列唯一）
             pos = (x == viol_pid.unsqueeze(1)).float().argmax(dim=1).long()  # [Ra]
-
-            # 3) 在 ±400 邻域内选另一个位置
             low = torch.clamp(pos - 400, min=0)
             high = torch.clamp(pos + 400, max=N - 1)
             range_size = (high - low + 1).clamp(min=1)
 
             rand_offset = torch.floor(torch.rand(Ra, device=DEVICE) * range_size.float()).long()
             new_pos = low + rand_offset
-            # 防止抽到同一位置（range_size>1 时修正）
+
             new_pos = torch.where(
                 (new_pos == pos) & (range_size > 1),
                 torch.where(pos == low, low + 1, low),
                 new_pos
             )
 
-            # 4) swap
             v1 = x[torch.arange(Ra, device=DEVICE), pos]
             v2 = x[torch.arange(Ra, device=DEVICE), new_pos]
             x[torch.arange(Ra, device=DEVICE), pos] = v2
             x[torch.arange(Ra, device=DEVICE), new_pos] = v1
 
-            # 写回到 X_sub
             X_sub[active_rows] = x
-
-            # 本轮对 active_rows 做了一次修复，max_swaps -= 1
             max_swaps[active_rows] -= 1
 
-        # 写回到原 X
         X[rows] = X_sub
         return X
 
@@ -857,7 +824,7 @@ class MultiRunOptimizer:
         idx1 = torch.randint(0, N, (R,), device=DEVICE)
         
         if use_range_limit:
-            low = torch.clamp(idx1 - 0, min=0)
+            low = torch.clamp(idx1 - 400, min=0)
             high = torch.clamp(idx1 + 400, max=N-1)
             range_size = high - low + 1
             range_size = torch.where(range_size <= 0, 1, range_size)
@@ -964,26 +931,49 @@ class MultiRunOptimizer:
 
 
     # ------- 导出（可选） -------
-    def generate_schedule(self, individual):
-        system = SchedulingSystem(self.machine_exam_map, self.block_start_date)
-        for cid in individual:
-            p = self.patients.get(cid)
-            if p and not p['scheduled']:
-                # 修复：确保所有检查都被安排
-                for exam in p['exams']:
-                    exam_type = clean_exam_name(exam[1])
-                    duration = exam[2]
-                    try:
-                        m, start_time = system.find_available_slot(duration, exam_type, p)
-                        m.add_exam(system.current_date, start_time, duration, exam_type, p)
-                    except Exception as e:
-                        # 避免在真实排程中打印
-                        # print(f"排程错误: {e}") 
-                        pass # 忽略错误并继续
-        return system
+    def generate_schedule(self, individual_cids):
+            self._ensure_gpu_engine()
+            if self._cid_to_idx is None or self._idx_to_cid is None:
+                self._idx_to_cid = list(self.sorted_patients)
+                self._cid_to_idx = {cid: i for i, cid in enumerate(self._idx_to_cid)}
+            base_date = self.block_start_date if self.block_start_date else START_DATE.date()
+            perm_idx = torch.tensor(
+                [self._cid_to_idx[cid] for cid in individual_cids],
+                dtype=DTYPE_LONG,
+                device=DEVICE
+            ).unsqueeze(0)
+            with torch.no_grad():
+                out = self._gpu_engine.fitness_batch(perm_idx, return_assignment=True)
+
+            assigned_day = out["assigned_day"][0].cpu().tolist()      # [N]
+            assigned_machine = out["assigned_machine"][0].cpu().tolist() # [N]
+            order_in_machine = out["order_in_machine"][0].cpu().tolist() # [N]
+            perm_cpu = perm_idx[0].cpu().tolist()  # [N] 患者的 index
+            bins = defaultdict(list)
+            for pos, pid_idx in enumerate(perm_cpu):
+                d = int(assigned_day[pos])
+                m = int(assigned_machine[pos])
+                o = int(order_in_machine[pos])
+                bins[(d, m)].append((o, int(pid_idx)))
+
+            system = SchedulingSystem(self.machine_exam_map, start_date=base_date)
+            for (d, m), lst in sorted(bins.items(), key=lambda kv: (kv[0][0], kv[0][1])):
+                current_date_obj = base_date + timedelta(days=int(d))
+                machine_obj = system.machines[int(m)]
+                cur_dt = datetime.combine(current_date_obj, WORK_START)
+                for _, pid_idx in sorted(lst, key=lambda x: x[0]):
+                    cid = self._idx_to_cid[int(pid_idx)]
+                    p = self.patients.get(cid)
+                    if not p:
+                        continue
+                    for exam in p["exams"]:
+                        exam_type = clean_exam_name(exam[1])
+                        duration = exam[2]
+                        cur_dt = machine_obj.add_exam(current_date_obj, cur_dt, duration, exam_type, p)
+
+            return system
 
 # ===================== 导出 Excel =====================
-# (export_schedule ... 保持不变 ...)
 def export_schedule(system, patients, filename):
     with pd.ExcelWriter(filename) as writer:
         rows = []
@@ -1011,25 +1001,14 @@ def export_schedule(system, patients, filename):
 def main():
     try:
         print(START_DATE)
-        # ================== 配置 ==================
-        
-        # 你希望并行运行多少个独立的GA实验？
-        # 这会成为 K 维度
-        NUM_PARALLEL_RUNS = 1 
-        
-        # 每个独立实验的种群大小
-        # 这会成为 B 维度
+        NUM_PARALLEL_RUNS = 8 
         POP_SIZE_PER_RUN = 50 
-        
-        # 进化代数
-        GENERATIONS_TO_RUN = 10000    
-        # ==========================================
-        
+        GENERATIONS_TO_RUN = 10000
         print(f"启动 Megabatch 模式: K={NUM_PARALLEL_RUNS} (并行实验), B={POP_SIZE_PER_RUN} (个体/实验)")
         print(f"总 GPU 批量: {NUM_PARALLEL_RUNS * POP_SIZE_PER_RUN} 个体")
         
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        patient_file = os.path.join(current_dir, '实验数据6.1 - 副本.xlsx')
+        current_dir = "/home/preprocess/_funsearch/baseline"
+        patient_file = os.path.join(current_dir, '实验数据6.1small - 副本.xlsx')
         duration_file = os.path.join(current_dir, '程序使用实际平均耗时3 - 副本.xlsx')
         device_constraint_file = os.path.join(current_dir, '设备限制4.xlsx')
         for f in [patient_file, duration_file, device_constraint_file]:
@@ -1102,7 +1081,6 @@ def main():
         print(f"运行时错误: {e}")
         traceback.print_exc()
     finally:
-        # 移除 input() 以便自动退出
         pass
 
 
