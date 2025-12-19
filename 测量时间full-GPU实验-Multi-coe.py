@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 from typing import List, Dict, Set, Tuple, Any
 import pandas as pd
@@ -339,6 +340,36 @@ class _GPUMatrixFitnessBatch:
         total_penalty = total_penalty * mask_valid.to(DTYPE_FLOAT)
 
         fitness = - total_penalty.sum(dim=1)
+        
+        # --- 修改开始：将位置违规映射回患者ID违规 ---
+        # 1. 计算当前排列中，每个位置是否违规 (Positional Mask)
+        viol_pos_mask_b_n = (
+            heart_v_i.bool()
+            | angio_v_i.bool()
+            | weekend_v_i.bool()
+            | (p_dev > 0)
+        ) & mask_valid # [B, N] 这里的N是位置索引
+
+        # 2. Scatter 到患者ID维度 (Patient Mask)
+        # perms[b, pos] = patient_id
+        # 我们需要 patient_viol_mask[b, patient_id] = True
+        patient_viol_mask = torch.zeros_like(viol_pos_mask_b_n, dtype=torch.bool)
+        # ---- PATCH: 防止 dummy(=N) / 负数索引导致 scatter 越界；同时避免重复 index 的覆盖写 ----
+        N_real = int(self.patient_durations.numel() - 1)   # 最后一位是 dummy
+        valid = (perms >= 0) & (perms < N_real)            # 只允许真实病人 0..N_real-1
+        idx = perms.clone()
+        idx[~valid] = 0                                   # 无效 index 置 0（并让 src=0，不产生影响）
+        patient_viol_cnt = torch.zeros((B, N_real), dtype=torch.int32, device=perms.device)
+        patient_viol_cnt.scatter_add_(dim=1, index=idx, src=(viol_pos_mask_b_n & valid).to(torch.int32))
+        patient_viol_mask = patient_viol_cnt > 0
+        W = patient_viol_mask.size(1)
+        perms_l = perms.long()
+        valid_idx = (perms_l >= 0) & (perms_l < W)
+        safe_index = torch.where(valid_idx, perms_l, torch.zeros_like(perms_l))
+        safe_src = torch.where(valid_idx, viol_pos_mask_b_n, torch.zeros_like(viol_pos_mask_b_n))
+        patient_viol_mask.scatter_(dim=1, index=safe_index, src=safe_src)
+        # --- 修改结束 ---
+
         out = {
             'fitness': fitness,
             'assigned_day': assigned_day_batch if return_assignment else None,
@@ -348,9 +379,9 @@ class _GPUMatrixFitnessBatch:
             'angio_cnt': (angio_v_i * mask_valid).sum(dim=1),
             'weekend_cnt': (weekend_v_i * mask_valid).sum(dim=1),
             'device_cnt': ((p_dev > 0) * mask_valid).sum(dim=1),
-            'any_violate_mask': ((heart_v_i.bool() | angio_v_i.bool() | weekend_v_i.bool() | (p_dev > 0)) & mask_valid).any(dim=1) 
+            'any_violate_mask': patient_viol_mask.any(dim=1), # 聚合是否有任意违规
+            'any_violate_mask_b_n': patient_viol_mask # [B, N] 这里的N是Patient ID
         }
-        out['any_violate_mask_b_n'] = ((heart_v_i.bool() | angio_v_i.bool() | weekend_v_i.bool() | (p_dev > 0)) & mask_valid)
         return out
 
 
@@ -572,10 +603,13 @@ class MultiRunOptimizer:
 
     def _heterogeneous_mutate_violations_gpu(self, sub_pop: torch.Tensor, violate_mask: torch.Tensor) -> torch.Tensor:
         """
-        步骤1: 纯 GPU 实现的异构定点变异（基于违规掩码）。
+        异构定点变异 (Patient Level)：
+        1. violate_mask 的维度是 [B, Total_N] (基于 Patient ID)
+        2. sub_pop 的维度是 [B, L] (值为 Patient ID)
+        3. 我们需要从 mask 中选出违规的 ID，并在 sub_pop 中找到它的位置进行交换。
         """
         B, L = sub_pop.shape
-        dummy = self.N
+        dummy = self.N # Dummy ID used for padding
 
         # 1. 找出存在违规的行
         has_violation = violate_mask.any(dim=1)
@@ -584,33 +618,56 @@ class MultiRunOptimizer:
         if viol_rows_idx.numel() == 0:
             return sub_pop
 
-        # 2. 在违规行中，选择一个违规位置 (Source)
-        subset_mask = violate_mask[viol_rows_idx]
-        viol_idx_in_row = torch.multinomial(subset_mask.float(), 1, replacement=True).flatten()
+        # 提取子集
+        subset_mask = violate_mask[viol_rows_idx] # [R, Total_N]
+        subset_pop = sub_pop[viol_rows_idx]       # [R, L]
+        R = viol_rows_idx.numel()
+
+        # 2. 在违规行中，选择一个违规的 Patient ID
+        viol_pid = torch.multinomial(subset_mask.float(), 1, replacement=True).flatten() # [R] (Patient IDs)
         
-        # 3. 选择一个目标交换位置 (Target)
-        valid_lens = (sub_pop[viol_rows_idx] < dummy).sum(dim=1)
+        # 3. 在 sub_pop 中找到这个 Patient ID 的位置 (Source Position)
+        # 注意：这里需要确保选中的 viol_pid 确实存在于 sub_pop 中。
+        # 由于 mask 是由 sub_pop 评估生成的，理论上一定存在。
+        # 使用 (subset_pop == viol_pid) 来定位
+        matches = (subset_pop == viol_pid.unsqueeze(1)) # [R, L]
+        # 找到匹配的索引 (argmax return first match index)
+        viol_idx_in_row = matches.float().argmax(dim=1).long()
         
-        rand_target = torch.rand(viol_rows_idx.numel(), device=DEVICE)
+        # 校验：如果某种原因没找到（比如mask滞后），则不操作该行
+        is_found = matches.any(dim=1)
+        
+        # 4. 选择一个目标交换位置 (Target Position)
+        valid_lens = (subset_pop < dummy).sum(dim=1)
+        
+        rand_target = torch.rand(R, device=DEVICE)
+        # 限制在有效长度内
         target_idx_in_row = (rand_target * valid_lens.float()).long()
         
-        offset = (torch.rand(viol_rows_idx.numel(), device=DEVICE) * (valid_lens.float() - 1)).long() + 1
+        # 避免原地交换
         target_idx_in_row = torch.where(
-            valid_lens > 1,
-            (viol_idx_in_row + offset) % valid_lens,
+            (target_idx_in_row == viol_idx_in_row) & (valid_lens > 1),
+            (viol_idx_in_row + 1) % valid_lens,
             target_idx_in_row
         )
 
-        # 4. 执行交换
-        row_idx = viol_rows_idx
-        idx1 = viol_idx_in_row
-        idx2 = target_idx_in_row
+        # 5. 执行交换 (仅对找到了位置的行执行)
+        final_rows = torch.arange(R, device=DEVICE)[is_found]
         
-        val1 = sub_pop[row_idx, idx1]
-        val2 = sub_pop[row_idx, idx2]
-        
-        sub_pop[row_idx, idx1] = val2
-        sub_pop[row_idx, idx2] = val1
+        if final_rows.numel() > 0:
+            idx1 = viol_idx_in_row[is_found]
+            idx2 = target_idx_in_row[is_found]
+            
+            # 使用 gather 提取值
+            val1 = subset_pop[final_rows, idx1]
+            val2 = subset_pop[final_rows, idx2]
+            
+            # 赋值
+            subset_pop[final_rows, idx1] = val2
+            subset_pop[final_rows, idx2] = val1
+            
+            # 写回主 Tensor
+            sub_pop[viol_rows_idx] = subset_pop
         
         return sub_pop
 
@@ -985,33 +1042,67 @@ class MultiRunOptimizer:
         children[mask_fill] = P2_tails_flat
         return children
     
-    def _mutate_step1_violations(self, X: torch.Tensor, parent_violate_mask: torch.Tensor) -> torch.Tensor:
+    def _mutate_step1_violations(
+        self,
+        X: torch.Tensor,
+        parent_violate_mask: torch.Tensor,
+        n_swaps_per_individual: int = 1
+    ) -> torch.Tensor:
         C, N = X.shape
-        any_viol_per_row = torch.any(parent_violate_mask, dim=1)
-        viol_rows_idx = torch.nonzero(any_viol_per_row, as_tuple=False).flatten()
-        R = viol_rows_idx.numel()
+        if parent_violate_mask is None or parent_violate_mask.shape != X.shape:
+            return X
+        if n_swaps_per_individual <= 0:
+            return X
+        any_viol = torch.any(parent_violate_mask, dim=1)  # [C]
+        rows = torch.nonzero(any_viol, as_tuple=False).flatten()
+        R = rows.numel()
         if R == 0:
             return X
-        viol_mask_subset = parent_violate_mask[viol_rows_idx]
-        viol_idx_in_row = torch.multinomial(viol_mask_subset.float(), 1, replacement=True).flatten()
-        low = torch.clamp(viol_idx_in_row - 400, min=0)
-        high = torch.clamp(viol_idx_in_row + 400, max=N-1)
-        range_size = high - low + 1
-        range_size = torch.where(range_size <= 0, 1, range_size)
-        rand_offset = torch.floor(torch.rand(R, device=DEVICE) * range_size).long()
-        cand_idx_in_row = low + rand_offset
-        cand_idx_in_row = torch.where(
-            (cand_idx_in_row == viol_idx_in_row) & (range_size > 1), 
-            torch.where(viol_idx_in_row == low, low + 1, low),
-            cand_idx_in_row
+        mask_sub = parent_violate_mask[rows]  # [R, N]
+        X_sub = X[rows]                       # [R, N]
+
+        viol_cnt = mask_sub.sum(dim=1).clamp(min=1)  # [R]
+        max_swaps = torch.minimum(
+            torch.full_like(viol_cnt, n_swaps_per_individual, device=DEVICE),
+            viol_cnt
         )
-        cand_idx_in_row = torch.clamp(cand_idx_in_row, 0, N-1)
-        val1 = X[viol_rows_idx, viol_idx_in_row]
-        val2 = X[viol_rows_idx, cand_idx_in_row]
-        X[viol_rows_idx, viol_idx_in_row] = val2
-        X[viol_rows_idx, cand_idx_in_row] = val1
+
+        for _ in range(int(n_swaps_per_individual)):
+            active = max_swaps > 0
+            active_rows = torch.nonzero(active, as_tuple=False).flatten()
+            if active_rows.numel() == 0:
+                break
+
+            m = mask_sub[active_rows]  # [Ra, N]
+            x = X_sub[active_rows]     # [Ra, N]
+            Ra = active_rows.numel()
+
+            viol_pid = torch.multinomial(m.float(), 1, replacement=True).flatten()  # [Ra]
+            pos = (x == viol_pid.unsqueeze(1)).float().argmax(dim=1).long()  # [Ra]
+            low = torch.clamp(pos - 400, min=0)
+            high = torch.clamp(pos + 400, max=N - 1)
+            range_size = (high - low + 1).clamp(min=1)
+
+            rand_offset = torch.floor(torch.rand(Ra, device=DEVICE) * range_size.float()).long()
+            new_pos = low + rand_offset
+
+            new_pos = torch.where(
+                (new_pos == pos) & (range_size > 1),
+                torch.where(pos == low, low + 1, low),
+                new_pos
+            )
+
+            v1 = x[torch.arange(Ra, device=DEVICE), pos]
+            v2 = x[torch.arange(Ra, device=DEVICE), new_pos]
+            x[torch.arange(Ra, device=DEVICE), pos] = v2
+            x[torch.arange(Ra, device=DEVICE), new_pos] = v1
+
+            X_sub[active_rows] = x
+            max_swaps[active_rows] -= 1
+
+        X[rows] = X_sub
         return X
-        
+
     def _mutate_step2_base_swap(self, X: torch.Tensor, current_gen: int, base_swap_prob: float = 0.95) -> torch.Tensor:
         C, N = X.shape
         use_range_limit = (current_gen <= 10000)
@@ -1133,7 +1224,7 @@ def export_schedule(system, patients, filename):
 
 def main():
     try:
-        NUM_PARALLEL_RUNS = 4 
+        NUM_PARALLEL_RUNS = 1 
         POP_SIZE_PER_RUN = 50 
         GENERATIONS_TO_RUN = 10000
         

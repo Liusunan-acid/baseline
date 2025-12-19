@@ -1753,9 +1753,16 @@ class MultiRunOptimizer:
                 pop = elites.clone()
             
             if (gen_idx + 1) % 50 == 0:
-                # 报告 K 个种群的平均最佳适应度
                 avg_best_fit = sum(best_fitness_per_run) / self.K
-                print(f"Generation {self.current_generation+1} | Avg Best Fitness (K={self.K}): {avg_best_fit:.2f}")
+                flat_viols = (out['heart_cnt'] + out['angio_cnt'] + 
+                              out['weekend_cnt'] + out['device_cnt'])
+                best_viols = torch.gather(
+                    flat_viols.view(self.K, self.B), 
+                    1, 
+                    topk_idx[:, :1]
+                )
+                avg_viols = best_viols.float().mean().item()
+                print(f"Generation {gen_idx+1} | Avg Best Fitness (K={self.K}): {avg_best_fit:.2f} | Avg Violations: {avg_viols:.2f}")
 
             self.current_generation += 1
 
@@ -2076,17 +2083,8 @@ def export_schedule(system, patients, filename):
 def main():
     try:
         print(START_DATE)
-        # ================== 配置 ==================
-        
-        # 你希望并行运行多少个独立的GA实验？
-        # 这会成为 K 维度
-        NUM_PARALLEL_RUNS = 4 
-        
-        # 每个独立实验的种群大小
-        # 这会成为 B 维度
+        NUM_PARALLEL_RUNS = 2 
         POP_SIZE_PER_RUN = 50 
-        
-        # 进化代数
         GENERATIONS_TO_RUN = 10000    
         # ==========================================
         
@@ -2169,7 +2167,6 @@ def main():
     finally:
         # 移除 input() 以便自动退出
         pass
-
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()

@@ -76,7 +76,6 @@ def stress_gpu_lite(target_memory_gb=5, target_utilization=0.1):
             
             step += 1
             if step % 5 == 0:
-                sys.stdout.write(f"\rzzz 正在低功耗运行... (工作: {work_time*1000:.1f}ms, 休眠: {sleep_time*1000:.1f}ms)")
                 sys.stdout.flush()
 
     except KeyboardInterrupt:
@@ -90,4 +89,4 @@ def stress_gpu_lite(target_memory_gb=5, target_utilization=0.1):
 
 if __name__ == "__main__":
     # 这里设置显存为 10GB，使用率为 10% (0.1)
-    stress_gpu_lite(target_memory_gb=20, target_utilization=0.5)
+    stress_gpu_lite(target_memory_gb=15, target_utilization=0.3)
