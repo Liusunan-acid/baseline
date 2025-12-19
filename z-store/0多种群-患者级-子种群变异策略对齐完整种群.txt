@@ -1,0 +1,123 @@
+总 GPU 批量: 200 个体
+✓ 所有数据文件均已找到。
+正在导入数据...
+成功导入7913患者，共7913个检查
+
+===== 启动并行遗传算法优化 (Megabatch GPU + 协同进化) =====
+已生成 4 个并行种群 (每个 50 个个体)，总计 200 个个体
+✓ 已生成 4 个初始种群，耗时: 0.2252s
+
+开始 5000 代进化 (K=4)...
+Generation 100 | Avg Best Fitness (K=4): -710849792.00 | Avg Violations: 1007.50
+Generation 200 | Avg Best Fitness (K=4): -508776904.00 | Avg Violations: 636.50
+Generation 300 | Avg Best Fitness (K=4): -376137392.00 | Avg Violations: 385.50
+Generation 400 | Avg Best Fitness (K=4): -294768096.00 | Avg Violations: 229.25
+Generation 500 | Avg Best Fitness (K=4): -251918800.00 | Avg Violations: 150.50
+Generation 600 | Avg Best Fitness (K=4): -230662400.00 | Avg Violations: 113.75
+Generation 700 | Avg Best Fitness (K=4): -216728500.00 | Avg Violations: 93.25
+Generation 800 | Avg Best Fitness (K=4): -207964500.00 | Avg Violations: 81.00
+Generation 900 | Avg Best Fitness (K=4): -200723800.00 | Avg Violations: 71.25
+Generation 1000 | Avg Best Fitness (K=4): -196208900.00 | Avg Violations: 65.75
+Generation 1100 | Avg Best Fitness (K=4): -191144400.00 | Avg Violations: 59.75
+Generation 1200 | Avg Best Fitness (K=4): -186844300.00 | Avg Violations: 54.00
+Generation 1300 | Avg Best Fitness (K=4): -183483100.00 | Avg Violations: 50.25
+Generation 1400 | Avg Best Fitness (K=4): -181206400.00 | Avg Violations: 49.00
+Generation 1500 | Avg Best Fitness (K=4): -178785000.00 | Avg Violations: 46.75
+Generation 1600 | Avg Best Fitness (K=4): -176526700.00 | Avg Violations: 45.25
+Generation 1700 | Avg Best Fitness (K=4): -174842200.00 | Avg Violations: 44.25
+Generation 1800 | Avg Best Fitness (K=4): -172851200.00 | Avg Violations: 42.75
+Generation 1900 | Avg Best Fitness (K=4): -170902300.00 | Avg Violations: 41.00
+Generation 2000 | Avg Best Fitness (K=4): -169446900.00 | Avg Violations: 39.75
+Generation 2100 | Avg Best Fitness (K=4): -168441500.00 | Avg Violations: 39.25
+Generation 2200 | Avg Best Fitness (K=4): -166862800.00 | Avg Violations: 37.50
+Generation 2300 | Avg Best Fitness (K=4): -165343600.00 | Avg Violations: 35.25
+Generation 2400 | Avg Best Fitness (K=4): -163908200.00 | Avg Violations: 34.25
+Generation 2500 | Avg Best Fitness (K=4): -162923300.00 | Avg Violations: 33.25
+Generation 2600 | Avg Best Fitness (K=4): -161719200.00 | Avg Violations: 31.50
+Generation 2700 | Avg Best Fitness (K=4): -160579200.00 | Avg Violations: 30.75
+Generation 2800 | Avg Best Fitness (K=4): -159562700.00 | Avg Violations: 29.75
+Generation 2900 | Avg Best Fitness (K=4): -158656000.00 | Avg Violations: 29.00
+Generation 3000 | Avg Best Fitness (K=4): -157783300.00 | Avg Violations: 28.50
+Generation 3100 | Avg Best Fitness (K=4): -157081000.00 | Avg Violations: 28.00
+Generation 3200 | Avg Best Fitness (K=4): -156452700.00 | Avg Violations: 27.50
+Generation 3300 | Avg Best Fitness (K=4): -155554200.00 | Avg Violations: 26.75
+Generation 3400 | Avg Best Fitness (K=4): -154807500.00 | Avg Violations: 26.25
+Generation 3500 | Avg Best Fitness (K=4): -154069200.00 | Avg Violations: 25.75
+Generation 3600 | Avg Best Fitness (K=4): -153652400.00 | Avg Violations: 25.75
+Generation 3700 | Avg Best Fitness (K=4): -153032400.00 | Avg Violations: 25.25
+Generation 3800 | Avg Best Fitness (K=4): -152731000.00 | Avg Violations: 25.25
+Generation 3900 | Avg Best Fitness (K=4): -152334900.00 | Avg Violations: 24.75
+Generation 4000 | Avg Best Fitness (K=4): -151951600.00 | Avg Violations: 24.75
+Generation 4100 | Avg Best Fitness (K=4): -151552700.00 | Avg Violations: 24.75
+Generation 4200 | Avg Best Fitness (K=4): -151243300.00 | Avg Violations: 24.75
+Generation 4300 | Avg Best Fitness (K=4): -150810600.00 | Avg Violations: 24.75
+Generation 4400 | Avg Best Fitness (K=4): -150376900.00 | Avg Violations: 24.50
+Generation 4500 | Avg Best Fitness (K=4): -149979900.00 | Avg Violations: 24.25
+Generation 4600 | Avg Best Fitness (K=4): -149590500.00 | Avg Violations: 24.00
+Generation 4700 | Avg Best Fitness (K=4): -149335300.00 | Avg Violations: 23.75
+Generation 4800 | Avg Best Fitness (K=4): -148996100.00 | Avg Violations: 23.50
+Generation 4900 | Avg Best Fitness (K=4): -148290300.00 | Avg Violations: 22.75
+Generation 5000 | Avg Best Fitness (K=4): -148158200.00 | Avg Violations: 23.00
+Generation 5100 | Avg Best Fitness (K=4): -147759500.00 | Avg Violations: 22.75
+Generation 5200 | Avg Best Fitness (K=4): -147431000.00 | Avg Violations: 22.50
+Generation 5300 | Avg Best Fitness (K=4): -147288300.00 | Avg Violations: 22.50
+Generation 5400 | Avg Best Fitness (K=4): -147087700.00 | Avg Violations: 22.50
+Generation 5500 | Avg Best Fitness (K=4): -146911300.00 | Avg Violations: 22.50
+Generation 5600 | Avg Best Fitness (K=4): -146728800.00 | Avg Violations: 22.50
+Generation 5700 | Avg Best Fitness (K=4): -146638900.00 | Avg Violations: 22.50
+Generation 5800 | Avg Best Fitness (K=4): -146474500.00 | Avg Violations: 22.50
+Generation 5900 | Avg Best Fitness (K=4): -146345300.00 | Avg Violations: 22.50
+Generation 6000 | Avg Best Fitness (K=4): -146226800.00 | Avg Violations: 22.50
+Generation 6100 | Avg Best Fitness (K=4): -145958900.00 | Avg Violations: 22.25
+Generation 6200 | Avg Best Fitness (K=4): -145836000.00 | Avg Violations: 22.25
+Generation 6300 | Avg Best Fitness (K=4): -145695800.00 | Avg Violations: 22.25
+Generation 6400 | Avg Best Fitness (K=4): -145488900.00 | Avg Violations: 22.25
+Generation 6500 | Avg Best Fitness (K=4): -145298100.00 | Avg Violations: 22.00
+Generation 6600 | Avg Best Fitness (K=4): -145084500.00 | Avg Violations: 21.75
+Generation 6700 | Avg Best Fitness (K=4): -144931000.00 | Avg Violations: 21.75
+Generation 6800 | Avg Best Fitness (K=4): -144734100.00 | Avg Violations: 21.75
+Generation 6900 | Avg Best Fitness (K=4): -144611600.00 | Avg Violations: 21.75
+Generation 7000 | Avg Best Fitness (K=4): -144454500.00 | Avg Violations: 21.75
+Generation 7100 | Avg Best Fitness (K=4): -144291600.00 | Avg Violations: 21.75
+Generation 7200 | Avg Best Fitness (K=4): -144209500.00 | Avg Violations: 21.75
+Generation 7300 | Avg Best Fitness (K=4): -144129500.00 | Avg Violations: 21.75
+Generation 7400 | Avg Best Fitness (K=4): -144034900.00 | Avg Violations: 21.75
+Generation 7500 | Avg Best Fitness (K=4): -143942600.00 | Avg Violations: 21.75
+Generation 7600 | Avg Best Fitness (K=4): -143564000.00 | Avg Violations: 20.50
+Generation 7700 | Avg Best Fitness (K=4): -143363800.00 | Avg Violations: 20.50
+Generation 7800 | Avg Best Fitness (K=4): -143233200.00 | Avg Violations: 20.50
+Generation 7900 | Avg Best Fitness (K=4): -143078400.00 | Avg Violations: 20.50
+Generation 8000 | Avg Best Fitness (K=4): -142948200.00 | Avg Violations: 20.50
+Generation 8100 | Avg Best Fitness (K=4): -142942200.00 | Avg Violations: 20.50
+Generation 8200 | Avg Best Fitness (K=4): -142847000.00 | Avg Violations: 20.50
+Generation 8300 | Avg Best Fitness (K=4): -142701200.00 | Avg Violations: 20.50
+Generation 8400 | Avg Best Fitness (K=4): -142638900.00 | Avg Violations: 20.50
+Generation 8500 | Avg Best Fitness (K=4): -142508700.00 | Avg Violations: 20.50
+Generation 8600 | Avg Best Fitness (K=4): -142433700.00 | Avg Violations: 20.50
+Generation 8700 | Avg Best Fitness (K=4): -142284100.00 | Avg Violations: 20.25
+Generation 8800 | Avg Best Fitness (K=4): -142218900.00 | Avg Violations: 20.25
+Generation 8900 | Avg Best Fitness (K=4): -142117200.00 | Avg Violations: 20.25
+Generation 9000 | Avg Best Fitness (K=4): -141881400.00 | Avg Violations: 20.00
+Generation 9100 | Avg Best Fitness (K=4): -141791600.00 | Avg Violations: 20.00
+Generation 9200 | Avg Best Fitness (K=4): -141751400.00 | Avg Violations: 20.00
+Generation 9300 | Avg Best Fitness (K=4): -141675600.00 | Avg Violations: 20.00
+Generation 9400 | Avg Best Fitness (K=4): -141613500.00 | Avg Violations: 20.00
+Generation 9500 | Avg Best Fitness (K=4): -141536200.00 | Avg Violations: 20.00
+Generation 9600 | Avg Best Fitness (K=4): -141448700.00 | Avg Violations: 20.00
+Generation 9700 | Avg Best Fitness (K=4): -141372300.00 | Avg Violations: 20.00
+Generation 9800 | Avg Best Fitness (K=4): -141335000.00 | Avg Violations: 20.00
+Generation 9900 | Avg Best Fitness (K=4): -141194000.00 | Avg Violations: 19.75
+Generation 10000 | Avg Best Fitness (K=4): -141106700.00 | Avg Violations: 19.75
+进化完成。正在提取 K 个最佳个体...
+
+✓ 进化完成 (K=4)，总耗时: 861.82s
+
+===== 正在导出 4 个最佳排程 =====
+  Run 0: Best Fitness: -142815600.00
+    ✓ 已导出至 output_schedules/final_schedule_RUN0_20251219_175020_fit_-142815600.xlsx
+  Run 1: Best Fitness: -141312000.00
+    ✓ 已导出至 output_schedules/final_schedule_RUN1_20251219_175020_fit_-141312000.xlsx
+  Run 2: Best Fitness: -139729600.00
+    ✓ 已导出至 output_schedules/final_schedule_RUN2_20251219_175020_fit_-139729600.xlsx
+  Run 3: Best Fitness: -140569600.00
+    ✓ 已导出至 output_schedules/final_schedule_RUN3_20251219_175020_fit_-140569600.xlsx

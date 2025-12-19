@@ -530,49 +530,106 @@ class MultiRunOptimizer:
         self.population_tensor = pop_indices
         print(f"已生成 {self.K} 个并行种群 (每个 {self.B} 个个体)，总计 {self.total_pop_size} 个个体")
 
+    # def _heterogeneous_crossover_batch_gpu(self, P1: torch.Tensor, P2: torch.Tensor) -> torch.Tensor:
+    #     """
+    #     纯 GPU 实现的异构交叉。
+    #     逻辑：Child 继承 P1 的有效基因集合。
+    #     其中属于 (P1 ∩ P2) 的基因，在 Child 中的相对顺序参考 P2。
+    #     属于 (P1 - P2) 的基因，保持在 P1 中的相对位置。
+    #     """
+    #     B, L = P1.shape
+    #     dummy = self.N
+        
+    #     # 1. 识别有效区域
+    #     P1_valid = P1 < dummy
+    #     P2_valid = P2 < dummy
+        
+    #     # 2. 识别 Common 元素 (在 P1 中且在 P2 中)
+    #     # 利用 Row Offset 技巧进行行内比较
+    #     row_ids = torch.arange(B, device=DEVICE).unsqueeze(1) * (self.N + 1)
+        
+    #     P1_off = P1 + row_ids
+    #     P2_off = P2 + row_ids
+        
+    #     # isin(A, B): 检查 A 的元素是否在 B 中
+    #     # Mask for P1: P1 的哪些位置包含 Common 元素
+    #     common_mask_p1 = torch.isin(P1_off, P2_off) & P1_valid
+        
+    #     # Mask for P2: P2 的哪些位置包含 Common 元素 (用于提取值，蕴含了 P2 的顺序)
+    #     common_mask_p2 = torch.isin(P2_off, P1_off) & P2_valid
+        
+    #     # 3. 提取 P2 中的 Common 值
+    #     # masked_select 返回 1D Tensor，按行优先顺序平铺
+    #     # 只要每行 Common 元素的数量一致（集合交集必然一致），顺序就会自动对齐
+    #     common_vals = torch.masked_select(P2, common_mask_p2)
+        
+    #     # 4. 填入 P1
+    #     Child = P1.clone()
+    #     # masked_scatter_ 会按顺序消费 common_vals 并填入 mask 为 True 的位置
+    #     Child.masked_scatter_(common_mask_p1, common_vals)
+        
+    #     return Child
     def _heterogeneous_crossover_batch_gpu(self, P1: torch.Tensor, P2: torch.Tensor) -> torch.Tensor:
         """
-        纯 GPU 实现的异构交叉。
-        逻辑：Child 继承 P1 的有效基因集合。
-        其中属于 (P1 ∩ P2) 的基因，在 Child 中的相对顺序参考 P2。
-        属于 (P1 - P2) 的基因，保持在 P1 中的相对位置。
+        [对齐版] 异构交叉：Child 继承 P1 的有效基因集合；
+        对于 (P1 ∩ P2) 的基因，在 Child 中的相对顺序参考 P2；
+        (P1 - P2) 的基因保持在 P1 的相对位置。
+
+        重要：支持“每行交集长度不同”，不会再因为 masked_select 扁平化导致行间错位。
         """
         B, L = P1.shape
         dummy = self.N
-        
-        # 1. 识别有效区域
+
         P1_valid = P1 < dummy
         P2_valid = P2 < dummy
-        
-        # 2. 识别 Common 元素 (在 P1 中且在 P2 中)
-        # 利用 Row Offset 技巧进行行内比较
-        row_ids = torch.arange(B, device=DEVICE).unsqueeze(1) * (self.N + 1)
-        
-        P1_off = P1 + row_ids
-        P2_off = P2 + row_ids
-        
-        # isin(A, B): 检查 A 的元素是否在 B 中
-        # Mask for P1: P1 的哪些位置包含 Common 元素
-        common_mask_p1 = torch.isin(P1_off, P2_off) & P1_valid
-        
-        # Mask for P2: P2 的哪些位置包含 Common 元素 (用于提取值，蕴含了 P2 的顺序)
-        common_mask_p2 = torch.isin(P2_off, P1_off) & P2_valid
-        
-        # 3. 提取 P2 中的 Common 值
-        # masked_select 返回 1D Tensor，按行优先顺序平铺
-        # 只要每行 Common 元素的数量一致（集合交集必然一致），顺序就会自动对齐
-        common_vals = torch.masked_select(P2, common_mask_p2)
-        
-        # 4. 填入 P1
-        Child = P1.clone()
-        # masked_scatter_ 会按顺序消费 common_vals 并填入 mask 为 True 的位置
-        Child.masked_scatter_(common_mask_p1, common_vals)
-        
-        return Child
 
+        # 用 row offset 把“同值但不同行”区分开，加速 isin 且避免跨行误匹配
+        row_off = (torch.arange(B, device=DEVICE, dtype=P1.dtype) * (dummy + 1)).unsqueeze(1)
+        P1_off = P1 + row_off
+        P2_off = P2 + row_off
+
+        common_p1 = P1_valid & torch.isin(P1_off, P2_off)
+        common_p2 = P2_valid & torch.isin(P2_off, P1_off)
+
+        # 在各自行内做 rank（True 的位置得到 0..m-1）
+        rank_p2 = common_p2.cumsum(dim=1) - 1
+        rank_p1 = common_p1.cumsum(dim=1) - 1
+
+        row_idx = torch.arange(B, device=DEVICE).unsqueeze(1).expand(B, L)
+
+        # 1) 构造每行按 P2 顺序排列的 common 值表 common_vals[b, r] = P2 中第 r 个 common
+        common_vals = torch.full((B, L), dummy, dtype=P1.dtype, device=DEVICE)
+        flat_r = row_idx[common_p2]
+        flat_c = rank_p2[common_p2]
+        flat_v = P2[common_p2]
+        common_vals[flat_r, flat_c] = flat_v
+
+        # 2) 构造 rank -> P1 列位置 的映射 pos_p1[b, r] = P1 中第 r 个 common 的列号
+        pos_p1 = torch.full((B, L), -1, dtype=torch.long, device=DEVICE)
+        col_idx = torch.arange(L, device=DEVICE).unsqueeze(0).expand(B, L)
+        flat_r1 = row_idx[common_p1]
+        flat_c1 = rank_p1[common_p1]
+        flat_v1 = col_idx[common_p1]
+        pos_p1[flat_r1, flat_c1] = flat_v1
+
+        # 3) 逐 rank 回填：Child[P1_common_positions] = common_vals（严格行内对齐）
+        m = common_p1.sum(dim=1)  # [B]
+        rank_mat = torch.arange(L, device=DEVICE).unsqueeze(0).expand(B, L)
+        use = rank_mat < m.unsqueeze(1)
+
+        flat_r2 = row_idx[use]
+        flat_pos = pos_p1[use]
+        flat_val2 = common_vals[use]
+
+        ok = flat_pos >= 0
+        children = P1.clone()
+        children[flat_r2[ok], flat_pos[ok]] = flat_val2[ok]
+        return children
+    
     def _heterogeneous_mutate_violations_gpu(self, sub_pop: torch.Tensor, violate_mask: torch.Tensor) -> torch.Tensor:
         """
         步骤1: 纯 GPU 实现的异构定点变异（基于违规掩码）。
+        [修改说明]：变异范围限制在违规位置的 +/- 400 内。
         """
         B, L = sub_pop.shape
         dummy = self.N
@@ -588,16 +645,23 @@ class MultiRunOptimizer:
         subset_mask = violate_mask[viol_rows_idx]
         viol_idx_in_row = torch.multinomial(subset_mask.float(), 1, replacement=True).flatten()
         
-        # 3. 选择一个目标交换位置 (Target)
-        valid_lens = (sub_pop[viol_rows_idx] < dummy).sum(dim=1)
+        # 3. 选择一个目标交换位置 (Target) - 限制在 +/- 400 范围内
+        # 获取选中行的有效长度
+        current_lens = (sub_pop[viol_rows_idx] < dummy).sum(dim=1)
         
-        rand_target = torch.rand(viol_rows_idx.numel(), device=DEVICE)
-        target_idx_in_row = (rand_target * valid_lens.float()).long()
+        # 计算局部窗口范围
+        low = torch.clamp(viol_idx_in_row - 400, min=0)
+        high = torch.clamp(viol_idx_in_row + 400, max=current_lens - 1)
+        span = high - low + 1
         
-        offset = (torch.rand(viol_rows_idx.numel(), device=DEVICE) * (valid_lens.float() - 1)).long() + 1
+        # 在窗口内随机选择位置
+        rand_offset = (torch.rand(viol_rows_idx.numel(), device=DEVICE) * span.float()).long()
+        target_idx_in_row = low + rand_offset
+
+        # 避免原地交换 (如果窗口大于1)
         target_idx_in_row = torch.where(
-            valid_lens > 1,
-            (viol_idx_in_row + offset) % valid_lens,
+            (target_idx_in_row == viol_idx_in_row) & (span > 1),
+            torch.where(target_idx_in_row < high, target_idx_in_row + 1, target_idx_in_row - 1),
             target_idx_in_row
         )
 
@@ -617,6 +681,7 @@ class MultiRunOptimizer:
     def _heterogeneous_mutate_general_gpu(self, sub_pop: torch.Tensor, prob: float = 1) -> torch.Tensor:
         """
         步骤2: 纯 GPU 实现的异构一般变异（随机交换）。
+        [修改说明]：变异范围限制在选中位置的 +/- 400 内。
         """
         B, L = sub_pop.shape
         dummy = self.N
@@ -637,12 +702,25 @@ class MultiRunOptimizer:
         # 3. 对需要变异的行操作
         target_lens = valid_lens[indices]
         
-        # 生成两个不同的随机位置
+        # 生成第一个随机位置 idx1
         rand1 = torch.rand(indices.numel(), device=DEVICE)
         idx1 = (rand1 * target_lens.float()).long()
         
-        offset = (torch.rand(indices.numel(), device=DEVICE) * (target_lens.float() - 1)).long() + 1
-        idx2 = (idx1 + offset) % target_lens
+        # 计算 idx1 周围 +/- 400 的窗口
+        low = torch.clamp(idx1 - 400, min=0)
+        high = torch.clamp(idx1 + 400, max=target_lens - 1)
+        span = high - low + 1
+        
+        # 生成第二个位置 idx2
+        rand_offset = (torch.rand(indices.numel(), device=DEVICE) * span.float()).long()
+        idx2 = low + rand_offset
+        
+        # 避免原地交换
+        idx2 = torch.where(
+            (idx2 == idx1) & (span > 1),
+            torch.where(idx2 < high, idx2 + 1, idx2 - 1),
+            idx2
+        )
         
         # 4. 执行交换
         row_idx = indices
@@ -739,61 +817,142 @@ class MultiRunOptimizer:
         
         return sub_pop
 
+    # def _evolve_heterogeneous_sub_pop(self, sub_pop: torch.Tensor, sub_engine: _GPUMatrixFitnessBatch, generations: int):
+    #     """
+    #     子种群进化循环 (In-place, 全 GPU)。
+    #     包含：交叉、定点变异、一般变异、贪婪聚类。
+    #     """
+    #     K, B, L = sub_pop.shape
+        
+    #     old_main_exam_id = self._patient_main_exam_id
+    #     self._patient_main_exam_id = self.patient_main_exam_id_all
+        
+    #     # 0. 初始评估
+    #     pop_flat = sub_pop.view(K*B, L)
+    #     out = sub_engine.fitness_batch(pop_flat)
+    #     current_fitness = out['fitness'].view(K, B)
+    #     # 获取初始的违规 Mask
+    #     current_viol_mask = out['any_violate_mask_b_n'].view(K, B, L)
+        
+    #     for _ in range(generations):
+    #         # 准备 P1 (即当前种群)
+    #         P1_flat = sub_pop.view(K*B, L)
+    #         # P1 对应的违规 Mask
+    #         P1_viol_mask_flat = current_viol_mask.view(K*B, L)
+            
+    #         # 准备 P2 (同组内随机打乱)
+    #         idx_in_b = torch.randint(0, B, (K, B), device=DEVICE)
+    #         batch_offsets = torch.arange(K, device=DEVICE).unsqueeze(1) * B
+    #         flat_p2_idx = (batch_offsets + idx_in_b).view(-1)
+    #         P2_flat = P1_flat[flat_p2_idx]
+            
+    #         # 1. 交叉 (Cross)
+    #         children_flat = self._heterogeneous_crossover_batch_gpu(P1_flat, P2_flat)
+            
+    #         # 2. 定点变异 (Mutation - Violations)
+    #         children_flat = self._heterogeneous_mutate_violations_gpu(children_flat, P1_viol_mask_flat)
+            
+    #         # 3. 一般变异 (Mutation - General)
+    #         children_flat = self._heterogeneous_mutate_general_gpu(children_flat, prob=0.8)
+
+    #         # 4. 贪婪聚类变异 (Mutation - Greedy Cluster)
+    #         children_flat = self._heterogeneous_mutate_greedy_cluster_gpu(children_flat, greedy_prob=0.3)
+            
+    #         # 5. 评估子代
+    #         out_child = sub_engine.fitness_batch(children_flat)
+    #         child_fitness = out_child['fitness'].view(K, B)
+    #         child_viol_mask = out_child['any_violate_mask_b_n'].view(K, B, L)
+            
+    #         # 6. 选择 (Selection) - (1+1) 策略
+    #         children = children_flat.view(K, B, L)
+    #         mask_better = child_fitness > current_fitness
+    #         mask_better_exp = mask_better.unsqueeze(2).expand(K, B, L)
+            
+    #         sub_pop = torch.where(mask_better_exp, children, sub_pop)
+    #         current_fitness = torch.where(mask_better, child_fitness, current_fitness)
+    #         current_viol_mask = torch.where(mask_better_exp, child_viol_mask, current_viol_mask)
+            
+    #     self._patient_main_exam_id = old_main_exam_id
+    #     return sub_pop
     def _evolve_heterogeneous_sub_pop(self, sub_pop: torch.Tensor, sub_engine: _GPUMatrixFitnessBatch, generations: int):
         """
         子种群进化循环 (In-place, 全 GPU)。
         包含：交叉、定点变异、一般变异、贪婪聚类。
+
+        [关键改动]：P2 选择为“同组内随机其它个体”，强制非 self，
+        让子阶段恢复跨个体的有效重组。
         """
         K, B, L = sub_pop.shape
-        
+
         old_main_exam_id = self._patient_main_exam_id
         self._patient_main_exam_id = self.patient_main_exam_id_all
-        
+
         # 0. 初始评估
-        pop_flat = sub_pop.view(K*B, L)
+        pop_flat = sub_pop.view(K * B, L)
         out = sub_engine.fitness_batch(pop_flat)
-        current_fitness = out['fitness'].view(K, B)
-        # 获取初始的违规 Mask
-        current_viol_mask = out['any_violate_mask_b_n'].view(K, B, L)
-        
+        current_fitness = out["fitness"].view(K, B)
+        current_viol_mask = out["any_violate_mask_b_n"].view(K, B, L)
+
         for _ in range(generations):
-            # 准备 P1 (即当前种群)
-            P1_flat = sub_pop.view(K*B, L)
-            # P1 对应的违规 Mask
-            P1_viol_mask_flat = current_viol_mask.view(K*B, L)
-            
-            # 准备 P2 (同组内随机打乱)
-            idx_in_b = torch.randint(0, B, (K, B), device=DEVICE)
+            # 准备 P1
+            P1_flat = sub_pop.view(K * B, L)
+            P1_viol_mask_flat = current_viol_mask.view(K * B, L)
+
+            # ====== P2：同组内随机“其它个体”（强制不等于自身） ======
+            if B > 1:
+                # 对每个 (k, b)，随机一个 delta ∈ [1, B-1]，让 idx2 = (b + delta) % B
+                delta = torch.randint(1, B, (K, B), device=DEVICE)
+                base = torch.arange(B, device=DEVICE).unsqueeze(0).expand(K, -1)
+                idx_in_b = (base + delta) % B
+            else:
+                # B==1 时没法跨个体，退化为自身
+                idx_in_b = torch.zeros((K, B), dtype=torch.long, device=DEVICE)
+
             batch_offsets = torch.arange(K, device=DEVICE).unsqueeze(1) * B
-            flat_p2_idx = (batch_offsets + idx_in_b).view(-1)
+
+            # ====== P2：从本 run 的精英池采样（强制 != self） ======
+            elite_pool = min(8, B)  # 你可以调 5~16；B 小就自动收缩
+            elite_idx = torch.topk(current_fitness, k=elite_pool, dim=1, largest=True).indices  # [K, elite_pool]
+
+            # 给每个 (k,b) 随机挑一个精英
+            pick = torch.randint(0, elite_pool, (K, B), device=DEVICE)                          # [K,B]
+            idx_in_b = elite_idx.gather(1, pick)                                                # [K,B] in [0,B)
+
+            # 强制 P2 != P1（如果撞上了，就换成精英池下一个）
+            base = torch.arange(B, device=DEVICE).unsqueeze(0).expand(K, B)
+            idx_in_b = torch.where(idx_in_b == base, elite_idx[:, 0:1].expand(K, B), idx_in_b)
+
+            batch_offsets = torch.arange(K, device=DEVICE).unsqueeze(1) * B
+            flat_p2_idx = (batch_offsets + idx_in_b).reshape(-1)
             P2_flat = P1_flat[flat_p2_idx]
-            
-            # 1. 交叉 (Cross)
+            # =========================================================
+
+            # 1) 交叉
             children_flat = self._heterogeneous_crossover_batch_gpu(P1_flat, P2_flat)
-            
-            # 2. 定点变异 (Mutation - Violations)
+
+            # 2) 定点变异（基于违规 mask）
             children_flat = self._heterogeneous_mutate_violations_gpu(children_flat, P1_viol_mask_flat)
-            
-            # 3. 一般变异 (Mutation - General)
+
+            # 3) 一般变异（局部交换）
             children_flat = self._heterogeneous_mutate_general_gpu(children_flat, prob=0.8)
 
-            # 4. 贪婪聚类变异 (Mutation - Greedy Cluster)
+            # 4) 贪婪聚类变异
             children_flat = self._heterogeneous_mutate_greedy_cluster_gpu(children_flat, greedy_prob=0.3)
-            
-            # 5. 评估子代
+
+            # 5) 评估子代
             out_child = sub_engine.fitness_batch(children_flat)
-            child_fitness = out_child['fitness'].view(K, B)
-            child_viol_mask = out_child['any_violate_mask_b_n'].view(K, B, L)
-            
-            # 6. 选择 (Selection) - (1+1) 策略
+            child_fitness = out_child["fitness"].view(K, B)
+            child_viol_mask = out_child["any_violate_mask_b_n"].view(K, B, L)
+
+            # 6) 选择 (1+1)
             children = children_flat.view(K, B, L)
             mask_better = child_fitness > current_fitness
             mask_better_exp = mask_better.unsqueeze(2).expand(K, B, L)
-            
+
             sub_pop = torch.where(mask_better_exp, children, sub_pop)
             current_fitness = torch.where(mask_better, child_fitness, current_fitness)
             current_viol_mask = torch.where(mask_better_exp, child_viol_mask, current_viol_mask)
-            
+
         self._patient_main_exam_id = old_main_exam_id
         return sub_pop
 
@@ -1143,7 +1302,7 @@ def main():
     try:
         NUM_PARALLEL_RUNS = 4 
         POP_SIZE_PER_RUN = 50 
-        GENERATIONS_TO_RUN = 10000
+        GENERATIONS_TO_RUN = 5000
         
         print(f"启动 Megabatch 模式: K={NUM_PARALLEL_RUNS} (并行实验), B={POP_SIZE_PER_RUN} (个体/实验)")
         print(f"总 GPU 批量: {NUM_PARALLEL_RUNS * POP_SIZE_PER_RUN} 个体")

@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 LOG_FILES = [
     r"/home/preprocess/_funsearch/baseline/z-store/0单种群-患者级.txt",
     r"/home/preprocess/_funsearch/baseline/z-store/0单种群-位置级.txt",
-    r"/home/preprocess/_funsearch/baseline/z-store/0多种群-患者级.txt",
+    r"/home/preprocess/_funsearch/baseline/z-store/0多种群-患者级-子种群变异策略对齐完整种群.txt",
     # r"",  # 预留第4个
 ]
 
