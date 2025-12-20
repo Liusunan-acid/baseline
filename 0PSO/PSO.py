@@ -1,11 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-测量时间 full-GPU 实验 - PSO 版本（最小侵入）
-- 通过 importlib 动态加载原 Multi 脚本
-- 复用其数据导入、约束、GPU 适应度引擎、排程导出
-- 使用 Random-Keys 离散 PSO：连续 pos -> argsort -> 患者排列
-"""
-
 from __future__ import annotations
 from typing import List, Any, Dict
 import os
@@ -38,23 +30,17 @@ multi = load_multi_module()
 
 # 复用 multi 中的关键对象/函数
 torch = multi.torch
-
 import_data = multi.import_data
 import_device_constraints = multi.import_device_constraints
-
 MachineSchedule = multi.MachineSchedule
 SchedulingSystem = multi.SchedulingSystem
-
 MultiRunOptimizer = multi.MultiRunOptimizer
-
-
 export_schedule = multi.export_schedule
 
 # 使用同一套设备/精度定义，保证完全对齐
 DEVICE = multi.DEVICE
 DTYPE_LONG = multi.DTYPE_LONG
 DTYPE_FLOAT = multi.DTYPE_FLOAT
-
 
 # ======================================
 # 2) PSO Optimizer：继承并复用 MultiRun
@@ -280,7 +266,7 @@ def main():
         POP_SIZE_PER_RUN = 100
 
         # PSO 参数
-        ITERS = 100000
+        ITERS = 10000
         W = 0.7
         C1 = 1
         C2 = 2
