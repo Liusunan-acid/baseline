@@ -1260,20 +1260,65 @@ class MultiRunOptimizer:
         X = self._mutate_step3_greedy_cluster(X, greedy_prob)
         return X
 
-    def generate_schedule(self, individual):
-        system = SchedulingSystem(self.machine_exam_map, self.block_start_date)
-        for cid in individual:
-            p = self.patients.get(cid)
-            if p and not p['scheduled']:
-                for exam in p['exams']:
-                    exam_type = clean_exam_name(exam[1])
-                    duration = exam[2]
-                    try:
-                        m, start_time = system.find_available_slot(duration, exam_type, p)
-                        m.add_exam(system.current_date, start_time, duration, exam_type, p)
-                    except Exception as e:
-                        pass 
-        return system
+    # ------- 导出（可选） -------
+    # def generate_schedule(self, individual):
+    #     system = SchedulingSystem(self.machine_exam_map, self.block_start_date)
+    #     for cid in individual:
+    #         p = self.patients.get(cid)
+    #         if p and not p['scheduled']:
+    #             # 修复：确保所有检查都被安排
+    #             for exam in p['exams']:
+    #                 exam_type = clean_exam_name(exam[1])
+    #                 duration = exam[2]
+    #                 try:
+    #                     m, start_time = system.find_available_slot(duration, exam_type, p)
+    #                     m.add_exam(system.current_date, start_time, duration, exam_type, p)
+    #                 except Exception as e:
+    #                     # 避免在真实排程中打印
+    #                     # print(f"排程错误: {e}") 
+    #                     pass # 忽略错误并继续
+    #     return system
+    def generate_schedule(self, individual_cids):
+            self._ensure_gpu_engine()
+            if self._cid_to_idx is None or self._idx_to_cid is None:
+                self._idx_to_cid = list(self.sorted_patients)
+                self._cid_to_idx = {cid: i for i, cid in enumerate(self._idx_to_cid)}
+            base_date = self.block_start_date if self.block_start_date else START_DATE.date()
+            perm_idx = torch.tensor(
+                [self._cid_to_idx[cid] for cid in individual_cids],
+                dtype=DTYPE_LONG,
+                device=DEVICE
+            ).unsqueeze(0)
+            with torch.no_grad():
+                out = self._gpu_engine.fitness_batch(perm_idx, return_assignment=True)
+
+            assigned_day = out["assigned_day"][0].cpu().tolist()      # [N]
+            assigned_machine = out["assigned_machine"][0].cpu().tolist() # [N]
+            order_in_machine = out["order_in_machine"][0].cpu().tolist() # [N]
+            perm_cpu = perm_idx[0].cpu().tolist()  # [N] 患者的 index
+            bins = defaultdict(list)
+            for pos, pid_idx in enumerate(perm_cpu):
+                d = int(assigned_day[pos])
+                m = int(assigned_machine[pos])
+                o = int(order_in_machine[pos])
+                bins[(d, m)].append((o, int(pid_idx)))
+
+            system = SchedulingSystem(self.machine_exam_map, start_date=base_date)
+            for (d, m), lst in sorted(bins.items(), key=lambda kv: (kv[0][0], kv[0][1])):
+                current_date_obj = base_date + timedelta(days=int(d))
+                machine_obj = system.machines[int(m)]
+                cur_dt = datetime.combine(current_date_obj, WORK_START)
+                for _, pid_idx in sorted(lst, key=lambda x: x[0]):
+                    cid = self._idx_to_cid[int(pid_idx)]
+                    p = self.patients.get(cid)
+                    if not p:
+                        continue
+                    for exam in p["exams"]:
+                        exam_type = clean_exam_name(exam[1])
+                        duration = exam[2]
+                        cur_dt = machine_obj.add_exam(current_date_obj, cur_dt, duration, exam_type, p)
+
+            return system
 
 def export_schedule(system, patients, filename):
     with pd.ExcelWriter(filename) as writer:

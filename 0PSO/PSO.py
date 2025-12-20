@@ -19,7 +19,7 @@ import importlib.util
 # =========================
 
 def load_multi_module():
-    current_dir = os.path.dirname(os.path.abspath(__file__))
+    current_dir = "/home/preprocess/_funsearch/baseline"
     multi_path = os.path.join(current_dir, "测量时间full-GPU实验-Multi.py")
 
     if not os.path.exists(multi_path):
@@ -143,7 +143,6 @@ class MultiRunPSOOptimizer(MultiRunOptimizer):
         self.gbest_pos = torch.gather(self.pos, 1, idx_exp).squeeze(1)  # [K,N]
         self.gbest_fit = best_vals
 
-        print(f"✓ PSO 初始化完成：已按 multi 规则生成 {K*B} 个初始序列并转换为分数表")
         return fit
 
 
@@ -153,7 +152,7 @@ class MultiRunPSOOptimizer(MultiRunOptimizer):
                    w: float = 0.7,
                    c1: float = 1.4,
                    c2: float = 1.4,
-                   vmax: float = 0.2,
+                   vmax: float = 0.1,
                    restart_every: int = 200,
                    restart_frac: float = 0.05,
                    log_every: int = 100):
@@ -224,14 +223,28 @@ class MultiRunPSOOptimizer(MultiRunOptimizer):
             # 6) 周期性重启最差粒子
             if restart_every > 0 and (t + 1) % restart_every == 0 and restart_frac > 0:
                 k_bad = max(1, int(B * restart_frac))
+                
+                # A. 找到最差的 k_bad 个粒子的掩码
                 worst_idx = torch.topk(fit, k=k_bad, largest=False, dim=1).indices  # [K,k_bad]
-
                 worst_mask = torch.zeros((K, B), device=DEVICE, dtype=torch.bool)
                 worst_mask.scatter_(1, worst_idx, True)
-
                 worst_mask_exp = worst_mask.unsqueeze(2).expand(K, B, N)
 
-                self.pos = torch.where(worst_mask_exp, torch.rand_like(self.pos), self.pos)
+                # B. 生成全新一代的分组扰动个体
+                # 调用父类方法刷新 self.population_tensor (side-effect)
+                super().initialize_population() 
+                new_pop_indices = self.population_tensor # [K, B, N]
+
+                # C. 将新生成的离散排列转换为连续 pos (复制 initialize_particles 中的逻辑)
+                rank = torch.arange(N, device=DEVICE, dtype=DTYPE_FLOAT)
+                rank_values = (rank / max(1, N)).view(1, 1, N).expand(K, B, N)
+                
+                new_pos_full = torch.empty((K, B, N), device=DEVICE, dtype=DTYPE_FLOAT)
+                new_pos_full.scatter_(dim=2, index=new_pop_indices, src=rank_values)
+
+                # D. 仅替换最差的那些粒子
+                self.pos = torch.where(worst_mask_exp, new_pos_full, self.pos)
+                # 重置速度为 0
                 self.vel = torch.where(worst_mask_exp, torch.zeros_like(self.vel), self.vel)
 
             # 7) 日志
@@ -256,8 +269,6 @@ class MultiRunPSOOptimizer(MultiRunOptimizer):
         return results
     
 
-
-
 # =========================
 # 3) PSO 主程序入口
 # =========================
@@ -269,22 +280,22 @@ def main():
         POP_SIZE_PER_RUN = 100
 
         # PSO 参数
-        ITERS = 1000000
+        ITERS = 100000
         W = 0.7
-        C1 = 1.4
-        C2 = 1.4
-        VMAX = 0.2
+        C1 = 1
+        C2 = 2
+        VMAX = 0.1
 
-        RESTART_EVERY = 200
-        RESTART_FRAC = 0.05
+        RESTART_EVERY = 2000
+        RESTART_FRAC = 0.02
         LOG_EVERY = 100
         # ==========================================================
 
         print(f"启动 PSO Megabatch 模式: K={NUM_PARALLEL_RUNS}, B={POP_SIZE_PER_RUN}")
         print(f"总 GPU 批量: {NUM_PARALLEL_RUNS * POP_SIZE_PER_RUN} 粒子")
 
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        patient_file = os.path.join(current_dir, '实验数据6.1small - 副本.xlsx')
+        current_dir = "/home/preprocess/_funsearch/baseline/data"
+        patient_file = os.path.join(current_dir, '实验数据6.1 - 副本.xlsx')
         duration_file = os.path.join(current_dir, '程序使用实际平均耗时3 - 副本.xlsx')
         device_constraint_file = os.path.join(current_dir, '设备限制4.xlsx')
 

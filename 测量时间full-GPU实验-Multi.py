@@ -1672,7 +1672,7 @@ class MultiRunOptimizer:
 
         # 种群现在是一个保存在 GPU 上的张量
         self.population_tensor = pop_indices
-        print(f"已生成 {self.K} 个并行种群 (每个 {self.B} 个个体)，总计 {self.total_pop_size} 个个体")
+        #print(f"已生成 {self.K} 个并行种群 (每个 {self.B} 个个体)，总计 {self.total_pop_size} 个个体")
 
 
     # ------- GA 主循环 (Megabatch 版) -------
