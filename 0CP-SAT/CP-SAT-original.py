@@ -2701,8 +2701,8 @@ class RollingHorizonScheduler:
 # ===================== 主程序 =====================
 
 def main():
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    patient_file = os.path.join(current_dir, '实验数据6.1small - 副本.xlsx')
+    current_dir = "/home/preprocess/_funsearch/baseline/data"
+    patient_file = os.path.join(current_dir, '实验数据6.1 - 副本.xlsx')
     duration_file = os.path.join(current_dir, '程序使用实际平均耗时3 - 副本.xlsx')
     device_constraint_file = os.path.join(current_dir, '设备限制4.xlsx')
 

@@ -1345,7 +1345,7 @@ def export_schedule(system, patients, filename):
 
 def main():
     try:
-        NUM_PARALLEL_RUNS = 4 
+        NUM_PARALLEL_RUNS = 8 
         POP_SIZE_PER_RUN = 50 
         GENERATIONS_TO_RUN = 5000
         
@@ -1353,7 +1353,7 @@ def main():
         print(f"总 GPU 批量: {NUM_PARALLEL_RUNS * POP_SIZE_PER_RUN} 个体")
         
         current_dir = "/home/preprocess/_funsearch/baseline/data"
-        patient_file = os.path.join(current_dir, '实验数据6.1 - 副本.xlsx')
+        patient_file = os.path.join(current_dir, '实验数据6.1small - 副本.xlsx')
         duration_file = os.path.join(current_dir, '程序使用实际平均耗时3 - 副本.xlsx')
         device_constraint_file = os.path.join(current_dir, '设备限制4.xlsx')
         for f in [patient_file, duration_file, device_constraint_file]:

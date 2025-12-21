@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 LOG_FILES = [
     r"/home/preprocess/_funsearch/baseline/0PSO/PSO-2700.log",
     r"/home/preprocess/_funsearch/baseline/0PSO/PSO-tuning.log",
-    r"",
+    r"/home/preprocess/_funsearch/baseline/z-store/0多种群-患者级-子种群变异策略对齐完整种群.txt",
     r"",
 ]
 
@@ -17,7 +17,7 @@ LOG_FILES = [
 LABELS = [
     "PSO Baseline",
     "Run B",
-    # "Run C",
+    "Run C",
 ]
 
 # 匹配示例：

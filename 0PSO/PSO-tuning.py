@@ -125,7 +125,6 @@ class MultiRunPSOOptimizer(MultiRunOptimizer):
 
         return fit
 
-
     @torch.no_grad()
     def evolve_pso(self,
                    iters: int = 5000,
@@ -143,9 +142,6 @@ class MultiRunPSOOptimizer(MultiRunOptimizer):
         - 更新 pbest/gbest
         - 速度/位置更新 + 限速
         - 周期性重启最差粒子防早熟
-
-        返回：
-        - results: List[Dict] (每个 run 的最优个体 cid 序列与 fitness)
         """
         self._ensure_gpu_engine()
 
@@ -154,25 +150,36 @@ class MultiRunPSOOptimizer(MultiRunOptimizer):
 
         K, B, N = self.K, self.B, self.N
 
+        # ✅ 仅作为“轻探索”的随机扰动配置（不改函数参数）
+        JITTER_EVERY = 0      # 每隔多少代做一次
+        JITTER_FRAC  = 0.1    # 做扰动的粒子比例
+
+        # ✅ 强化定点变异：每个违规粒子连续做几步邻域交换（不改函数参数）
+        PIN_STEPS = 1
+        PIN_WINDOW = 400
+
         for t in range(iters):
 
-            # # ================================================================================        
-            # # 0) 离散扰动：对所有粒子做一次“随机两患者 key 交换”（最小侵入）
-            # idx1 = torch.randint(0, N, (K, B), device=DEVICE)
-            # # 用 offset 保证 idx2 != idx1
-            # offset = torch.randint(1, N, (K, B), device=DEVICE)
-            # idx2 = (idx1 + offset) % N
+            # ================================================================================
+            # 0) 离散扰动：不要每代对所有粒子做（那会把 PSO 变随机游走）
+            #    改为：每隔 JITTER_EVERY 代，对 JITTER_FRAC 的粒子做一次随机 swap
+            # ================================================================================
+            if JITTER_EVERY > 0 and (t + 1) % JITTER_EVERY == 0 and JITTER_FRAC > 0:
+                do_jit = (torch.rand((K, B), device=DEVICE) < JITTER_FRAC)  # [K,B]
+                if do_jit.any():
+                    idx1 = torch.randint(0, N, (K, B), device=DEVICE)
+                    offset = torch.randint(1, N, (K, B), device=DEVICE)
+                    idx2 = (idx1 + offset) % N
 
-            # i1 = idx1.unsqueeze(2)  # [K,B,1]
-            # i2 = idx2.unsqueeze(2)  # [K,B,1]
+                    # 只对 do_jit 生效：无效处让 idx1==idx2，swap 无影响
+                    idx1 = torch.where(do_jit, idx1, idx2)
 
-            # v1 = self.pos.gather(2, i1)  # [K,B,1]
-            # v2 = self.pos.gather(2, i2)  # [K,B,1]
-
-            # # swap in-place
-            # self.pos.scatter_(2, i1, v2)
-            # self.pos.scatter_(2, i2, v1)
-            # # ================================================================================        
+                    i1 = idx1.unsqueeze(2)  # [K,B,1]
+                    i2 = idx2.unsqueeze(2)  # [K,B,1]
+                    v1 = self.pos.gather(2, i1)
+                    v2 = self.pos.gather(2, i2)
+                    self.pos.scatter_(2, i1, v2)
+                    self.pos.scatter_(2, i2, v1)
 
             # 1) 连续 -> 排列
             perms = torch.argsort(self.pos, dim=2)
@@ -185,26 +192,90 @@ class MultiRunPSOOptimizer(MultiRunOptimizer):
             # 3) 更新 pbest
             improve = fit > self.pbest_fit
             self.pbest_fit = torch.where(improve, fit, self.pbest_fit)
-
             improve_exp = improve.unsqueeze(2).expand(K, B, N)
             self.pbest_pos = torch.where(improve_exp, self.pos, self.pbest_pos)
 
             # 4) 更新 gbest（每个 run 独立）
             best_vals, best_idx = torch.max(self.pbest_fit, dim=1)  # [K]
             better_g = best_vals > self.gbest_fit
-
             self.gbest_fit = torch.where(better_g, best_vals, self.gbest_fit)
 
             idx_exp = best_idx.view(K, 1, 1).expand(K, 1, N)
             cand_gbest_pos = torch.gather(self.pbest_pos, 1, idx_exp).squeeze(1)
-
             better_g_exp = better_g.view(K, 1).expand(K, N)
             self.gbest_pos = torch.where(better_g_exp, cand_gbest_pos, self.gbest_pos)
+
+            # ================== ✅ 违规定点变异（增强版）：连续 PIN_STEPS 次邻域交换 ==================
+            pos_before = self.pos.clone()  # 用于回滚
+
+            viol = out.get("any_violate_mask_b_n", None)
+            if viol is not None:
+                viol = viol.view(K, B, N)         # [K,B,N]（位置维）
+                has_bad = viol.any(dim=2)         # [K,B]
+
+                if has_bad.any():
+                    # 连续做几步（单步往往修不动硬约束）
+                    for _ in range(PIN_STEPS):
+                        # 当前排列（注意：每步变异后排列会变，所以这里要重算 perms）
+                        perms_cur = torch.argsort(self.pos, dim=2)
+
+                        # 选一个违规位置（取第一个 True；简单但有效）
+                        bad_pos = viol.float().argmax(dim=2).to(torch.long)  # [K,B]
+
+                        # 在 ±PIN_WINDOW 里选邻居位置
+                        W = min(PIN_WINDOW, N - 1)
+                        off = torch.randint(1, W + 1, (K, B), device=DEVICE, dtype=torch.long)
+                        sign = torch.where(torch.rand((K, B), device=DEVICE) < 0.5,
+                                           torch.full((K, B), -1, device=DEVICE, dtype=torch.long),
+                                           torch.full((K, B),  1, device=DEVICE, dtype=torch.long))
+                        off = off * sign
+
+                        nbr_pos = (bad_pos + off).clamp(0, N - 1)
+                        nbr_pos = torch.where(nbr_pos == bad_pos,
+                                              (bad_pos + 1).clamp(0, N - 1),
+                                              nbr_pos)
+                        nbr_pos = torch.where(has_bad, nbr_pos, bad_pos)
+
+                        # 取出两个位置对应的患者 id
+                        pid1 = perms_cur.gather(2, bad_pos.unsqueeze(2)).squeeze(2)  # [K,B]
+                        pid2 = perms_cur.gather(2, nbr_pos.unsqueeze(2)).squeeze(2)  # [K,B]
+
+                        # 交换这两个患者的 key
+                        i1 = pid1.unsqueeze(2)
+                        i2 = pid2.unsqueeze(2)
+                        v1 = self.pos.gather(2, i1)
+                        v2 = self.pos.gather(2, i2)
+                        self.pos.scatter_(2, i1, v2)
+                        self.pos.scatter_(2, i2, v1)
+
+            # ===== ✅ 变异后重新评估，并且只接受更优（否则回滚）=====
+            perms2 = torch.argsort(self.pos, dim=2)
+            out2 = self._gpu_engine.fitness_batch(perms2.reshape(K * B, N), return_assignment=False)
+            fit2 = out2["fitness"].reshape(K, B)
+
+            better = fit2 > fit
+            better_exp = better.unsqueeze(2).expand(K, B, N)
+            self.pos = torch.where(better_exp, self.pos, pos_before)
+            fit = torch.where(better, fit2, fit)
+
+            # 补更新 pbest/gbest（让变异真正能留下来）
+            improve2 = fit > self.pbest_fit
+            self.pbest_fit = torch.where(improve2, fit, self.pbest_fit)
+            improve2_exp = improve2.unsqueeze(2).expand(K, B, N)
+            self.pbest_pos = torch.where(improve2_exp, self.pos, self.pbest_pos)
+
+            best_vals2, best_idx2 = torch.max(self.pbest_fit, dim=1)
+            better_g2 = best_vals2 > self.gbest_fit
+            self.gbest_fit = torch.where(better_g2, best_vals2, self.gbest_fit)
+
+            idx_exp2 = best_idx2.view(K, 1, 1).expand(K, 1, N)
+            cand_gbest_pos2 = torch.gather(self.pbest_pos, 1, idx_exp2).squeeze(1)
+            better_g2_exp = better_g2.view(K, 1).expand(K, N)
+            self.gbest_pos = torch.where(better_g2_exp, cand_gbest_pos2, self.gbest_pos)
 
             # 5) 速度/位置更新
             r1 = torch.rand((K, B, N), device=DEVICE, dtype=DTYPE_FLOAT)
             r2 = torch.rand((K, B, N), device=DEVICE, dtype=DTYPE_FLOAT)
-
             gbest_expand = self.gbest_pos.unsqueeze(1).expand(K, B, N)
 
             self.vel = (
@@ -212,44 +283,35 @@ class MultiRunPSOOptimizer(MultiRunOptimizer):
                 + c1 * r1 * (self.pbest_pos - self.pos)
                 + c2 * r2 * (gbest_expand - self.pos)
             )
-
-            # 限速
             self.vel = torch.clamp(self.vel, -vmax, vmax)
-
-            # 更新位置
             self.pos = self.pos + self.vel
 
             # 6) 周期性重启最差粒子
             if restart_every > 0 and (t + 1) % restart_every == 0 and restart_frac > 0:
                 k_bad = max(1, int(B * restart_frac))
-                
-                # A. 找到最差的 k_bad 个粒子的掩码
                 worst_idx = torch.topk(fit, k=k_bad, largest=False, dim=1).indices  # [K,k_bad]
                 worst_mask = torch.zeros((K, B), device=DEVICE, dtype=torch.bool)
                 worst_mask.scatter_(1, worst_idx, True)
                 worst_mask_exp = worst_mask.unsqueeze(2).expand(K, B, N)
 
-                # B. 生成全新一代的分组扰动个体
-                # 调用父类方法刷新 self.population_tensor (side-effect)
-                super().initialize_population() 
-                new_pop_indices = self.population_tensor # [K, B, N]
+                super().initialize_population()
+                new_pop_indices = self.population_tensor  # [K,B,N]
 
-                # C. 将新生成的离散排列转换为连续 pos (复制 initialize_particles 中的逻辑)
                 rank = torch.arange(N, device=DEVICE, dtype=DTYPE_FLOAT)
                 rank_values = (rank / max(1, N)).view(1, 1, N).expand(K, B, N)
-                
+
                 new_pos_full = torch.empty((K, B, N), device=DEVICE, dtype=DTYPE_FLOAT)
                 new_pos_full.scatter_(dim=2, index=new_pop_indices, src=rank_values)
 
-                # D. 仅替换最差的那些粒子
                 self.pos = torch.where(worst_mask_exp, new_pos_full, self.pos)
-                # 重置速度为 0
                 self.vel = torch.where(worst_mask_exp, torch.zeros_like(self.vel), self.vel)
 
             # 7) 日志
             if log_every > 0 and (t + 1) % log_every == 0:
                 avg_best = float(self.gbest_fit.mean().item())
-                print(f"[PSO] Iter {t+1:5d}/{iters} | Avg gbest(K={K}): {avg_best:.4f}")
+                # 额外打印：变异接受率（帮助你确认“算子有没有在起作用”）
+                acc = float(better.float().mean().item())
+                print(f"[PSO] Iter {t+1:5d}/{iters} | Avg gbest(K={K}): {avg_best:.4f} | mut_accept={acc:.3f}")
 
         # 8) 输出 K 个最优解
         final_perm_idx = torch.argsort(self.gbest_pos, dim=1)  # [K, N]
@@ -258,7 +320,6 @@ class MultiRunPSOOptimizer(MultiRunOptimizer):
         for k in range(K):
             row = final_perm_idx[k].detach().cpu()
             cids = self._tensor_row_to_cids(row)
-
             results.append({
                 "run_id": k,
                 "fitness": float(self.gbest_fit[k].item()),
@@ -266,6 +327,7 @@ class MultiRunPSOOptimizer(MultiRunOptimizer):
             })
 
         return results
+
     
 
 # =========================

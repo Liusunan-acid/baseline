@@ -368,7 +368,6 @@ def destroy_random_k(state: PermState, rng: np.random.Generator, ratio=0.05):
     s.perm = s.perm[mask]
     return s
 
-
 # -------------------------
 # 4) Destroy operator（新增：等待/违规导向）
 # -------------------------
@@ -549,7 +548,7 @@ def build_engine_via_optimizer(user_mod, patients, machine_exam_map, block_start
 # -------------------------
 # 8) ALNS 主流程
 # -------------------------
-def run_alns(engine, init_perm: np.ndarray, seed=0, iters=10000):
+def run_alns(engine, init_perm: np.ndarray, seed=0, iters=1000):
     rng = np.random.default_rng()
     alns = ALNS(rng)
 
@@ -633,17 +632,17 @@ def main():
     parser.add_argument(
         "--device_file",
         type=str,
-        default="/home/preprocess/_funsearch/baseline/设备限制4.xlsx"
+        default="/home/preprocess/_funsearch/baseline/data/设备限制4.xlsx"
     )
     parser.add_argument(
         "--patient_file",
         type=str,
-        default="/home/preprocess/_funsearch/baseline/实验数据6.1small - 副本.xlsx"
+        default="/home/preprocess/_funsearch/baseline/data/实验数据6.1 - 副本.xlsx"
     )
     parser.add_argument(
         "--duration_file",
         type=str,
-        default="/home/preprocess/_funsearch/baseline/程序使用实际平均耗时3 - 副本.xlsx"
+        default="/home/preprocess/_funsearch/baseline/data/程序使用实际平均耗时3 - 副本.xlsx"
     )
 
     parser.add_argument("--iters", type=int, default=10000)
@@ -702,3 +701,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+#    CUDA_VISIBLE_DEVICES=3 /home/preprocess/.conda/envs/fastsurfer_gpu/bin/python /home/preprocess/_funsearch/baseline/0ALNS/ALNS.py
