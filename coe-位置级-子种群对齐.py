@@ -19,7 +19,7 @@ TRANSITION_PENALTY = 20000
 LOGICAL = 10000
 SELF_SELECTED_PENALTY = 8000
 NON_SELF_PENALTY = 800
-START_DATE = datetime(2024, 12, 1, 7, 0)
+START_DATE = datetime(2025, 1, 1, 7, 0)
 MACHINE_COUNT = 6
 DEVICE_PENALTY = 500000
 
@@ -1345,7 +1345,7 @@ def export_schedule(system, patients, filename):
 
 def main():
     try:
-        NUM_PARALLEL_RUNS = 8 
+        NUM_PARALLEL_RUNS = 4 
         POP_SIZE_PER_RUN = 50 
         GENERATIONS_TO_RUN = 5000
         
@@ -1353,7 +1353,7 @@ def main():
         print(f"总 GPU 批量: {NUM_PARALLEL_RUNS * POP_SIZE_PER_RUN} 个体")
         
         current_dir = "/home/preprocess/_funsearch/baseline/data"
-        patient_file = os.path.join(current_dir, '实验数据6.1small - 副本.xlsx')
+        patient_file = os.path.join(current_dir, '实验数据6.1 - 副本.xlsx')
         duration_file = os.path.join(current_dir, '程序使用实际平均耗时3 - 副本.xlsx')
         device_constraint_file = os.path.join(current_dir, '设备限制4.xlsx')
         for f in [patient_file, duration_file, device_constraint_file]:
@@ -1415,3 +1415,7 @@ def main():
 if __name__ == "__main__":
     multiprocessing.freeze_support()
     main()
+
+
+
+#   CUDA_VISIBLE_DEVICES=0 python /home/preprocess/_funsearch/baseline/coe-位置级-子种群对齐.py

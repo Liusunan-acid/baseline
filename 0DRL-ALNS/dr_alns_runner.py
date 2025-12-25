@@ -736,7 +736,10 @@ def dr_alns_episode(
         cost_diff_best = float((cur_cost - best_cost) / denom)
         search_budget = float((it + 1) / max_iters)
 
-        reward = float(reward_best) if best_improved else 0.0
+        # reward = float(reward_best) if best_improved else 0.0
+        denom = abs(best_cost) if abs(best_cost) > 1e-9 else 1.0  # 你后面本来就这么算 cost_diff_best 用 :contentReference[oaicite:6]{index=6}
+        step_improve = max(0.0, (prev_cost - cur_cost) / denom)   # 只奖励“本步接受后带来的改进”（密集、可归因）
+        reward = float(step_improve) + (float(reward_best) if best_improved else 0.0)
 
         rollout.s.append(s_vec.copy())
         rollout.a.append((a_d, a_r, a_sev, a_temp))
@@ -1011,7 +1014,7 @@ def main():
     # determine deploy iters
     deploy_iters = args.deploy_iters
     if deploy_iters <= 0:
-        deploy_iters = max(3 * args.iters_per_episode, 1000)
+        deploy_iters = max(3 * args.iters_per_episode, 10000)
 
     best_deploy_cost = float("inf")
     best_deploy_perm: Optional[np.ndarray] = None

@@ -2244,7 +2244,7 @@
 #     multiprocessing.freeze_support()
 #     main()
 
-
+import time
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, time as datetime_time
@@ -2701,6 +2701,9 @@ class RollingHorizonScheduler:
 # ===================== 主程序 =====================
 
 def main():
+    import time
+    t0 = time.time()  
+
     current_dir = "/home/preprocess/_funsearch/baseline/data"
     patient_file = os.path.join(current_dir, '实验数据6.1 - 副本.xlsx')
     duration_file = os.path.join(current_dir, '程序使用实际平均耗时3 - 副本.xlsx')
@@ -2722,6 +2725,13 @@ def main():
     out_file = os.path.join(current_dir, f'schedule_seconds_fifo_{ts}.xlsx')
     scheduler.export_excel(out_file, score_data=(score, details))
 
+    t1 = time.time()
+    print(f"\n⏱ 程序运行总时间: {t1 - t0:.2f} 秒")
+
 if __name__ == "__main__":
     multiprocessing.freeze_support()
     main()
+
+
+
+#    nohup /home/preprocess/.conda/envs/fastsurfer_gpu/bin/python /home/preprocess/_funsearch/baseline/0CP-SAT/CP-SAT-original.py   > CP-SAT-400.log 2>&1 &
