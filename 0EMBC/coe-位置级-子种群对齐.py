@@ -142,7 +142,7 @@ class SchedulingSystem:
         self.current_machine = 0
 
     def reset(self):
-        self.current_date = self.start_date
+        self.current_date = self.start_dates
         self.current_machine = 0
 
     def move_to_next(self):
@@ -269,7 +269,7 @@ class _GPUMatrixFitnessBatch:
         neg_wait = torch.clamp(-delta, min=0).to(DTYPE_FLOAT)
         is_self = self.is_self_selected.index_select(0, perms.reshape(-1)).reshape(perms.shape).to(DTYPE_FLOAT)
         non_self = 1.0 - is_self
-        return pos_wait * (is_self * SELF_SELECTED_PENALTY + non_self * NON_SELF_PENALTY) + neg_wait * LOGICAL
+        return pos_wait * (is_self * SELF_SELECTED_PENALTY + non_self * NON_SELF_PENALTY) + neg_wait * LOGICAL,pos_wait
 
     def _device_violate(self, assigned_machine_batch: torch.Tensor, perms: torch.Tensor) -> torch.Tensor:
         if (self.patient_exam_mask is None) or (self.machine_exam_mask is None):
@@ -315,7 +315,8 @@ class _GPUMatrixFitnessBatch:
         diff_type = (current_types != prev_types)
         is_transition = same_bin & diff_type
         is_transition[:, 0] = False 
-        return is_transition.to(DTYPE_FLOAT) * TRANSITION_PENALTY
+        return is_transition.to(DTYPE_FLOAT) * TRANSITION_PENALTY,is_transition
+
 
     def fitness_batch(self, perms: torch.Tensor, return_assignment: bool = False):
         perms = perms.to(DEVICE)
@@ -328,15 +329,18 @@ class _GPUMatrixFitnessBatch:
         assigned_machine_batch = self.bin_machine.index_select(0, bin_idx_batch.reshape(-1)).reshape(B, N)
         weekday_batch = (self.start_weekday + assigned_day_batch) % 7
 
-        p_wait  = self._penalty_waiting(assigned_day_batch, perms)
+        p_wait, pos_wait_days = self._penalty_waiting(assigned_day_batch, perms)
         p_dev   = self._penalty_device_cover(assigned_machine_batch, perms)
         p_spec, heart_v_i, angio_v_i, weekend_v_i = self._penalty_special_rules(weekday_batch, assigned_machine_batch, perms)
-        p_tran  = self._penalty_machine_switching(bin_idx_batch, perms)
+        p_tran, is_transition = self._penalty_machine_switching(bin_idx_batch, perms)
 
         total_penalty = p_wait + p_dev + p_spec + p_tran
         
         mask_valid = (durations_batch > 0)
         total_penalty = total_penalty * mask_valid.to(DTYPE_FLOAT)
+
+        wait_days_sum = (pos_wait_days * mask_valid.to(DTYPE_FLOAT)).sum(dim=1)          # [B]
+        switch_cnt = (is_transition & mask_valid).sum(dim=1).to(torch.int32)            # [B]
 
         fitness = - total_penalty.sum(dim=1)
         out = {
@@ -351,6 +355,8 @@ class _GPUMatrixFitnessBatch:
             'any_violate_mask': ((heart_v_i.bool() | angio_v_i.bool() | weekend_v_i.bool() | (p_dev > 0)) & mask_valid).any(dim=1) 
         }
         out['any_violate_mask_b_n'] = ((heart_v_i.bool() | angio_v_i.bool() | weekend_v_i.bool() | (p_dev > 0)) & mask_valid)
+        out["wait_days_sum"] = wait_days_sum
+        out["switch_cnt"] = switch_cnt
         return out
 
 
