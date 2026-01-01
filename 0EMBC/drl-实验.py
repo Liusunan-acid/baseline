@@ -665,7 +665,7 @@ CUDA_VISIBLE_DEVICES=1 python /home/preprocess/_funsearch/baseline/0EMBC/drl-实
   --patient_file "/home/preprocess/_funsearch/baseline/data/实验数据6.1 - 副本.xlsx" \
   --duration_file "/home/preprocess/_funsearch/baseline/data/程序使用实际平均耗时3 - 副本.xlsx" \
   --device_file "/home/preprocess/_funsearch/baseline/data/设备限制4.xlsx" \
-  --K 4 --B 50 --generations 5000 --elite_size 5 \
+  --K 1 --B 50 --generations 5000 --elite_size 5 \
   --train_episodes 50 \
   --ckpt_path drl_coe_ckpt.pt --save_every 1
 
