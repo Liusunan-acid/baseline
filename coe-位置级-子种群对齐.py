@@ -1418,4 +1418,4 @@ if __name__ == "__main__":
 
 
 
-#   CUDA_VISIBLE_DEVICES=1 python /home/preprocess/_funsearch/baseline/0EMBC/coe-位置级-子种群对齐.py
+#   CUDA_VISIBLE_DEVICES=3 python /home/preprocess/_funsearch/baseline/coe-位置级-子种群对齐.py
